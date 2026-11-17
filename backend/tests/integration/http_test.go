@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,4 +113,28 @@ func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 	// No route can change the name
 	res = do("PUT", "/api/v1/profile/name", `{"firstName":"X"}`, map[string]string{"If-Match": `"2"`}, cookies)
 	assert.Equal(t, http.StatusNotFound, res.StatusCode)
+
+	// Skill catalog: active seed skills in display order
+	res = do("GET", "/api/v1/skills", "", nil, cookies)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var catalog []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&catalog))
+	require.GreaterOrEqual(t, len(catalog), 2)
+	assert.Equal(t, "Go", catalog[0].Name)
+
+	// Missing skillIds → 400; valid set → new version
+	res = do("PUT", "/api/v1/profile/skills", `{}`, map[string]string{"If-Match": `"2"`}, cookies)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+	body := `{"skillIds":[` + strconv.FormatInt(catalog[0].ID, 10) + `,` + strconv.FormatInt(catalog[1].ID, 10) + `]}`
+	res = do("PUT", "/api/v1/profile/skills", body, map[string]string{"If-Match": `"2"`}, cookies)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, `"3"`, res.Header.Get("ETag"))
+
+	res = do("GET", "/api/v1/profile", "", nil, cookies)
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&p))
+	assert.Len(t, p.Skills, 2)
 }
