@@ -2,6 +2,8 @@ package imaging
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -66,8 +68,24 @@ func TestNormalize_Rejects(t *testing.T) {
 		assert.ErrorIs(t, err, entity.ErrValidation)
 	})
 	t.Run("decompression bomb header", func(t *testing.T) {
-		// Valid PNG header claiming 10000×10000 pixels.
-		_, err := p.Normalize(bytes.NewReader(pngBytes(t, 10000, 10000)))
+		// A tiny file whose PNG header claims 10000×10000 pixels.
+		_, err := p.Normalize(bytes.NewReader(pngHeaderOnly(10000, 10000)))
 		assert.ErrorIs(t, err, entity.ErrPhotoTooLarge)
 	})
+}
+
+// pngHeaderOnly builds a PNG signature + IHDR chunk, enough for DecodeConfig.
+func pngHeaderOnly(w, h uint32) []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], w)
+	binary.BigEndian.PutUint32(ihdr[4:], h)
+	ihdr[8], ihdr[9] = 8, 2 // 8-bit RGB
+
+	var buf bytes.Buffer
+	buf.WriteString("\x89PNG\r\n\x1a\n")
+	_ = binary.Write(&buf, binary.BigEndian, uint32(len(ihdr)))
+	buf.WriteString("IHDR")
+	buf.Write(ihdr)
+	_ = binary.Write(&buf, binary.BigEndian, crc32.ChecksumIEEE(append([]byte("IHDR"), ihdr...)))
+	return buf.Bytes()
 }
