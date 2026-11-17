@@ -61,6 +61,8 @@ func classify(err error) (int, ErrorBody) {
 		return http.StatusRequestEntityTooLarge, ErrorBody{Code: "PAYLOAD_TOO_LARGE", Message: "Photo must be at most 5 MB."}
 	case errors.Is(err, entity.ErrPhotoFormat):
 		return http.StatusUnsupportedMediaType, ErrorBody{Code: "UNSUPPORTED_MEDIA_TYPE", Message: "Photo must be a JPEG, PNG or WebP image."}
+	case errors.Is(err, entity.ErrDuplicate):
+		return http.StatusConflict, ErrorBody{Code: "ALREADY_EXISTS", Message: "This name is already in use."}
 	case errors.Is(err, entity.ErrConflict):
 		return http.StatusConflict, ErrorBody{Code: "VERSION_CONFLICT", Message: "Profile was updated elsewhere. Please reload."}
 	default:

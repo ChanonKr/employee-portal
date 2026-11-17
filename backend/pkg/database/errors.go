@@ -29,7 +29,7 @@ func MapError(err error) error {
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case codeUniqueViolation:
-			return fmt.Errorf("%w: %s", entity.ErrConflict, pgErr.ConstraintName)
+			return fmt.Errorf("%w: %s", entity.ErrDuplicate, pgErr.ConstraintName)
 		case codeCheckViolation:
 			return entity.NewValidationError(pgErr.ConstraintName, "violates a data rule")
 		case codeForeignKeyViolation:

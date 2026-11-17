@@ -10,7 +10,8 @@ import (
 // pkg/httputil maps them to HTTP status codes and error codes.
 var (
 	ErrNotFound     = errors.New("not found")
-	ErrConflict     = errors.New("conflict")
+	ErrConflict     = errors.New("conflict")       // stale version (optimistic locking)
+	ErrDuplicate    = errors.New("already exists") // unique value taken (e.g. skill name)
 	ErrForbidden    = errors.New("forbidden")
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrValidation   = errors.New("validation failed")
