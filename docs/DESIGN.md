@@ -97,7 +97,8 @@ employee-portal/
 │   │   ├── skill/                      # GET /skills (catalog สำหรับ picker)
 │   │   ├── history/                    # GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
 │   │   ├── file/                       # GET /files/photos/:name (handler อย่างเดียว — stream ไฟล์)
-│   │   ├── admin/                      # (ขั้นถัดไป) โครงเดียวกัน
+│   │   ├── setting/                    # Admin → Settings (history days)
+│   │   ├── admin/                      # (ขั้นถัดไป) employees, stats
 │   ├── pkg/
 │   │   ├── database/
 │   │   │   ├── postgres.go             # pgxpool + ping
@@ -325,7 +326,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | PostgreSQL | ความหมาย | Domain error | HTTP |
 |---|---|---|---|
 | `pgx.ErrNoRows` | ไม่พบข้อมูล | `ErrNotFound` | 404 |
-| `23505` unique_violation | ชื่อ skill ซ้ำ | `ErrConflict` | 409 |
+| `23505` unique_violation | ชื่อ skill ซ้ำ | `ErrDuplicate` | 409 `ALREADY_EXISTS` |
 | `23514` check_violation | ละเมิด CHECK (เช่น เบอร์ผิดรูปแบบ) | `ErrValidation` | 400 |
 | `23503` foreign_key_violation | อ้างอิง id ที่ไม่มี | `ErrValidation` | 400 |
 | version ไม่ตรง (ตรวจใน service) | มีคนแก้ก่อน | `ErrConflict` | 409 |
@@ -354,12 +355,14 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | GET | `/admin/stats` | – | dashboard stats |
-| GET | `/admin/skills` | – | `[{id, name, isActive, sortOrder, usedBy}]` |
-| POST | `/admin/skills` | `{name}` | `{id}` · 409 ถ้าชื่อซ้ำ |
-| PATCH | `/admin/skills/:id` | `{name?, isActive?}` | 204 |
-| PUT | `/admin/skills/order` | `[{id, sortOrder}]` | 204 |
-| GET | `/admin/settings` | – | `{historyDays, updatedBy, updatedAt}` |
-| PUT | `/admin/settings/history-days` | `{value}` (1–365) | 204 |
+| GET | `/admin/skills` | – | `[{id, name, isActive, sortOrder, usedBy}]` (รวม inactive) |
+| POST | `/admin/skills` | `{name}` (trim + ยุบช่องว่าง, 1–50 ตัว) | 201 `{id}` · ต่อท้ายรายการ · 409 `ALREADY_EXISTS` ถ้าชื่อซ้ำ (ไม่สนตัวพิมพ์) |
+| PATCH | `/admin/skills/:id` | `{name?, isActive?}` (ต้องมีอย่างน้อย 1) | 204 · 404 id ไม่มี · 409 ชื่อซ้ำ |
+| PUT | `/admin/skills/order` | `[{id, sortOrder}]` | 204 · id ไม่รู้จักแม้ตัวเดียว → 404 และไม่มีอะไรเปลี่ยน (transaction) |
+| GET | `/admin/settings` | – | `{historyDays, updatedBy: {id, employeeCode} \| null, updatedAt \| null}` |
+| PUT | `/admin/settings/history-days` | `{value}` (จำนวนเต็ม 1–365) | 204 · มีผลกับ `/profile/history` ทันที |
+
+module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · ทุก admin use case เรียก `entity.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
 | GET | `/admin/employees` | `?q=&page=&pageSize=` | `{items, page, total}` |
 | GET | `/admin/employees/:id` | – | `Profile` + role |
 | GET | `/admin/employees/:id/history` | `?field=&page=` | เหมือน `/profile/history` (ไม่จำกัดแค่ `days` — admin ดูย้อนหลังได้ทั้งหมด) |
@@ -405,6 +408,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | `NOT_FOUND` | 404 |
 | `METHOD_NOT_ALLOWED` | 405 |
 | `VERSION_CONFLICT` | 409 |
+| `ALREADY_EXISTS` (เช่น ชื่อ skill ซ้ำ) | 409 |
 | `PAYLOAD_TOO_LARGE` | 413 |
 | `PRECONDITION_REQUIRED` (ไม่ส่ง `If-Match`) | 428 |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 |
