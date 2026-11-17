@@ -29,11 +29,19 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/portal?sslmode=disable
+      # Trust X-Forwarded-For from the web (nginx) container on the compose network,
+      # so rate limits see the real client IP.
+      TRUSTED_PROXIES: 172.16.0.0/12
     depends_on:
       migrate: { condition: service_completed_successfully }
     ports: ["8080:8080"]
     volumes:
       - uploads:/data/uploads
+
+  web:
+    build: ./frontend
+    depends_on: [api]
+    ports: ["5173:80"]
 
 volumes:
   pg-data: {}

@@ -3,7 +3,7 @@ MIGRATE_IMAGE := migrate/migrate:v4.19.1
 OWNER_DB_URL  := postgres://owner:owner@localhost:5432/portal?sslmode=disable
 BACKEND       := backend
 
-.PHONY: help env up down reset logs migrate-up migrate-down sqlc sqlc-check run test test-integration vet
+.PHONY: help env up down reset logs migrate-up migrate-down sqlc sqlc-check run web test test-integration test-web vet
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-18s %s\n",$$1,$$2}'
@@ -11,7 +11,7 @@ help: ## List targets
 env: ## Create .env with a random JWT secret (if missing)
 	@test -f .env || (sed "s/^JWT_SECRET=$$/JWT_SECRET=$$(openssl rand -hex 32)/" .env.example > .env && echo "created .env")
 
-up: env ## Start postgres, run migrations, start the API
+up: env ## Start postgres, run migrations, the API and the web app (http://localhost:5173)
 	docker compose up -d --build
 
 down: ## Stop containers (keeps data)
@@ -39,6 +39,12 @@ sqlc-check: ## Fail if generated code is out of date (CI)
 
 run: env ## Run the API locally against the compose postgres
 	cd $(BACKEND) && set -a && . ../.env && set +a && UPLOAD_DIR=../uploads go run ./app
+
+web: ## Run the frontend dev server (proxies /api to localhost:8080)
+	cd frontend && npm run dev
+
+test-web: ## Frontend typecheck + unit tests
+	cd frontend && npm run typecheck && npm test
 
 vet: ## go vet (including integration tests)
 	cd $(BACKEND) && go vet -tags integration ./...
