@@ -48,14 +48,14 @@ func New(cfg configs.Config, log *slog.Logger, pool *pgxpool.Pool) (*Server, err
 		middleware.Recover(log),
 		middleware.Logger(log),
 		middleware.SecureHeaders(),
-		cors.New(cors.Config{
+		middleware.SameOriginOrCORS(cors.New(cors.Config{
 			AllowOrigins:     cfg.CORSOrigins,
 			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
 			AllowHeaders:     []string{"Content-Type", "If-Match", "X-Request-ID"},
 			ExposeHeaders:    []string{"ETag", "X-Request-ID", "Retry-After"},
 			AllowCredentials: true,
 			MaxAge:           12 * time.Hour,
-		}),
+		})),
 		middleware.Timeout(requestTimeout),
 	)
 	engine.NoRoute(func(c *gin.Context) {

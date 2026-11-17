@@ -7,7 +7,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': '/src' } },
   // Same origin in dev: the session cookie (Path=/api, SameSite=Strict) just works.
-  server: { proxy: { '/api': 'http://localhost:8080' } },
+  // changeOrigin stays false so Host matches the browser's Origin (the API skips
+  // the CORS allowlist for same-origin requests).
+  server: { proxy: { '/api': { target: 'http://localhost:8080', changeOrigin: false } } },
   test: {
     environment: 'jsdom',
     globals: true,
