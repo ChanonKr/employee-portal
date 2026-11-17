@@ -5,7 +5,7 @@ time), and skills, with a change history for the last N days. Admins manage the 
 catalog and the history window.
 
 **Backend:** Go 1.27 · Gin · PostgreSQL 17 · pgx + sqlc · golang-migrate
-**Frontend:** React + Vite (in progress)
+**Frontend:** React 19 · Vite · TypeScript · TanStack Query · React Router · Tailwind CSS · Radix UI
 
 Full design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
 
@@ -14,9 +14,12 @@ Full design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
 Requires Docker.
 
 ```bash
-make up          # creates .env with a random JWT secret, then starts postgres → migrations → API
-curl localhost:8080/api/v1/healthz
+make up          # creates .env with a random JWT secret, then starts postgres → migrations → API → web
+open http://localhost:5173
 ```
+
+For frontend work with hot reload: `make up` once, then `make web` (Vite proxies `/api` to :8080;
+stop the `web` container first, or Vite picks the next free port).
 
 | Account     | Password   | What it shows                                              |
 |-------------|------------|------------------------------------------------------------|
@@ -69,13 +72,34 @@ Errors use one envelope: `{"error": {"code", "message", "fields", "requestId"}}`
 ## Tests
 
 ```bash
-make test               # unit tests (no database)
-make test-integration   # PostgreSQL 17 in Docker via testcontainers
+make test               # Go unit tests (no database)
+make test-integration   # Go integration tests: PostgreSQL 17 in Docker via testcontainers
+make test-web           # frontend typecheck + Vitest / Testing Library
+make e2e                # Playwright against the full stack: desktop, iPhone 13 and iPad
 ```
 
 Integration tests cover concurrent edits (one wins, the rest get 409), rollback when the
 history insert fails, the history window following the admin setting without a restart,
 photo cleanup on failure, and the database role being unable to rewrite history.
+End-to-end tests create a fresh employee per test, then edit contact details, skills and
+the photo, check the history and the admin flows, and assert there is no horizontal scroll.
+
+## Frontend layout
+
+```
+frontend/src/
+├── api/              fetch client (error envelope, If-Match) and API types
+├── components/       app shell + a small UI kit (Radix + Tailwind)
+├── features/
+│   ├── auth/         sign-in, forced password change, route guards
+│   ├── profile/      photo, per-field contact edit, skills picker, checklist, recent changes
+│   ├── history/      timeline shared by the employee and admin views
+│   └── admin/        dashboard, employees, skills, settings
+└── lib/              formatting, media query, debounce
+```
+
+Phones get a single column and bottom sheets for editing; tablets and desktops get inline
+editing and popovers. Every edit sends `If-Match`; a 409 reloads the profile and says why.
 
 ## Backend layout
 

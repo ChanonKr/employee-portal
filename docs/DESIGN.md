@@ -58,7 +58,7 @@
 ### 2.1 Tech Stack
 | Layer | เลือกใช้ |
 |---|---|
-| Frontend | React 18 + TypeScript, Vite, React Router, TanStack Query, React Hook Form + Zod, Tailwind + shadcn/ui |
+| Frontend | React 19 + TypeScript 5.9, Vite 8, React Router 8, TanStack Query 5, React Hook Form + Zod 4, Tailwind 4 + Radix UI (component เขียนเองแบบ shadcn), sonner (toast), Vitest + Testing Library, Playwright |
 | HTTP | `gin-gonic/gin`, `gin-contrib/cors` |
 | DB driver | `jackc/pgx/v5` (`pgxpool`) |
 | Query | `sqlc` — เขียน SQL ในไฟล์ `.sql` → generate ฟังก์ชัน Go แบบ type-safe (ตรวจ query ตั้งแต่ตอน generate) |
@@ -539,7 +539,8 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
   profile := api.Group("/profile", mw.Auth())   // employee id มาจาก JWT เสมอ — URL ไม่มี id
   admin := api.Group("/admin", mw.Auth(), mw.RequireRole("admin"))
   ```
-- Rate limit `/auth/login` 5 req/นาที/IP, upload 10 req/นาที/user
+- Rate limit `/auth/login` 5 req/นาที/IP (ปรับได้ด้วย `LOGIN_RATE_LIMIT` — E2E ตั้งสูงเพราะทุก test login จาก IP เดียว), `/auth/change-password` 5 req/นาที/user, upload 10 req/นาที/user
+- CORS: request ที่ `Origin` ตรงกับ `Host` (same-origin ผ่าน nginx / Vite proxy) ข้าม allowlist — browser ส่ง `Origin` แม้เป็น same-origin POST · cross-origin ยังต้องอยู่ใน `CORS_ORIGINS` · nginx / Vite ส่ง `Host` เดิม (มี port) ต่อให้ API
 - *(X5)* บัญชีใหม่และบัญชีที่ถูก reset มี `must_change_password = TRUE` → login ใส่ claim `mcp` ใน JWT → middleware `RequirePasswordChanged` ทำให้ API ทุกตัวยกเว้น `/auth/*` ตอบ 403 `PASSWORD_CHANGE_REQUIRED` จนกว่าจะเรียก `POST /auth/change-password` (ได้ cookie ใหม่ที่ไม่มี `mcp`)
   - รหัสชั่วคราว 12 ตัวจาก `crypto/rand` (ไม่มี 0/O/1/l/I) · เก็บแค่ bcrypt hash · policy รหัสใหม่: ≥ 8 ตัว, ≤ 72 bytes, มีตัวอักษรและตัวเลข, ต้องไม่ซ้ำรหัสเดิม
   - ข้อจำกัด: JWT แบบ stateless → reset รหัสแล้ว session เดิมของผู้ใช้ยังใช้ได้จนหมดอายุ (≤ 8 ชม.) · ทางแก้ในอนาคต: `token_version` ใน users แล้วเช็กใน middleware
@@ -612,7 +613,8 @@ ValidateSkillIDs (≤ 20, ไม่ซ้ำ, > 0 — ตัดทิ้งก�
 |---|---|
 | **Vite** (ไม่ใช่ CRA / Next.js) | dev server เร็ว + HMR (ช่วยตอน live debug), build เป็น static files, proxy `/api` → Go ในตัว (ไม่ต้องตั้ง CORS ตอน dev), ใช้ Vitest config เดียวกัน · ไม่ต้องการ SSR/SEO เพราะเป็น portal ภายในที่ต้อง login |
 | **Tailwind CSS** | utility-first, mobile-first breakpoints ใน class (`md:`, `lg:`) |
-| **shadcn/ui** (Radix + Tailwind) | component โค้ดอยู่ในโปรเจกต์ (อธิบาย/แก้ได้ทุกบรรทัด), a11y มาในตัว, มี Dialog/Drawer/Command/Toast ครบ |
+| **Radix UI + Tailwind** (แนวเดียวกับ shadcn/ui แต่เขียนเองไม่ใช้ CLI) | component อยู่ในโปรเจกต์ (`components/ui/` — อธิบาย/แก้ได้ทุกบรรทัด), a11y (focus trap, aria) จาก Radix · Dialog ตัวเดียวเป็นทั้ง dialog (≥ 768px) และ bottom sheet (มือถือ) |
+| **nginx** เสิร์ฟ SPA + proxy `/api` | origin เดียวกับ API → cookie `SameSite=Strict; Path=/api` ใช้ได้โดยไม่ต้องตั้ง CORS · `/assets/*` cache ถาวร (ชื่อไฟล์มี hash), `index.html` no-cache |
 
 ```ts
 // vite.config.ts
@@ -637,7 +639,8 @@ export default defineConfig({
 
 **Navbar:** `Profile` · `Admin` (เฉพาะ admin) · Logout
 - **ไม่มีเมนู History บน navbar** — เข้า `/history` ผ่านลิงก์ "View all" ในการ์ด Recent changes เท่านั้น (pattern สรุป → รายละเอียด, history เป็นส่วนหนึ่งของโปรไฟล์)
-- มือถือ: employee มีเมนูน้อยจนไม่ต้องใช้ hamburger · admin ใช้ hamburger → Sheet
+- มือถือ: เมนูน้อยจนไม่ต้องใช้ hamburger (ทั้ง employee และ admin) · เมนูย่อยของ admin เป็นแถบเลื่อนแนวนอนแทน Sheet (กดน้อยกว่า 1 ครั้ง, ไม่ซ่อนเมนู)
+- เปลี่ยนรหัส: ไอคอนกุญแจบน navbar → `/change-password` · บัญชีที่ใช้รหัสชั่วคราวถูกพาไปหน้านี้ก่อนทุกหน้า
 
 ### 9.3 App Boot & Auth Flow
 ```
@@ -688,16 +691,17 @@ export default defineConfig({
 - Filter chips: All · Photo · Mobile · Email · Address · Skills
 - Timeline จัดกลุ่มตามวัน (Today / Yesterday / วันที่) · แต่ละรายการ: ไอคอน field, `ค่าเดิม` (ขีดฆ่า) → ค่าใหม่, เวลา, ผู้แก้ (ไอคอนคน = ตัวเอง, ไอคอนโล่ = admin)
 - Skills แสดงเป็น diff สี: `+CI/CD` (เขียว) `−Flutter` (แดง)
-- Desktop: ตารางกว้าง · Mobile: การ์ด · โหลดเพิ่มด้วย "Load more" (pagination)
+- Timeline แบบเดียวกันทุกขนาดจอ (การ์ดต่อวัน — อ่านง่ายกว่าตารางเมื่อค่าเป็น diff ของ skills) · chip filter เลื่อนแนวนอนบนมือถือ · โหลดเพิ่มด้วย "Load more" (`useInfiniteQuery`)
+- `HistoryTimeline` ใช้ร่วมกับหน้า admin (`/admin/employees/:id` แสดง "all time" เพราะ API คืน `days: null`)
 - Empty state ใช้ข้อความเดียวกับ §9.5
 
 ### 9.7 หน้า Admin
-Layout: navbar มี badge **Admin** + sidebar (Dashboard, Employees, Skills, Settings) · มือถือ sidebar → Sheet
+Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · ต่ำกว่านั้นเป็นแถบเลื่อนแนวนอน · สร้างบัญชี / รีเซ็ตรหัสแสดงรหัสชั่วคราวครั้งเดียวพร้อมปุ่ม Copy
 
 | หน้า | องค์ประกอบ |
 |---|---|
 | Dashboard | การ์ดตัวเลข 3–4 ใบ: จำนวนพนักงาน, % โปรไฟล์ครบ, top 5 skills, การแก้ไขล่าสุด |
-| Skills | ตาราง: drag handle (มือถือใช้ปุ่ม ↑↓), Name (แก้ inline ✓/✕), Used by, สวิตช์ Active, ค้นหา, ปุ่ม Add skill · หมายเหตุ "Inactive skills disappear from the picker, but employees who already have them keep them." |
+| Skills | รายการ: ปุ่ม ↑↓ ทุกขนาดจอ (แทน drag — ใช้ keyboard/screen reader ได้, ส่งลำดับใหม่ทั้งชุดใน request เดียว), Name (แก้ inline ✓/✕), Used by, สวิตช์ Active, ค้นหา, ปุ่ม Add skill · หมายเหตุ "Inactive skills disappear from the picker, but employees who already have them keep them." |
 | Settings | Change history: input จำนวนวัน + ปุ่มลัด 7/14/30/90, hint "1–365 days. Older records are kept, just hidden.", แสดงผู้แก้ล่าสุด, Save มีผลทันที |
 | Employees | ตารางค้นหาชื่อ/รหัส + pagination (มือถือเป็นการ์ด) |
 | Employee detail | ข้อมูลโปรไฟล์, ช่อง Legal name (badge "Admin only") + Save name, history ทั้งหมดของคนนั้น (ระบุผู้แก้) |
