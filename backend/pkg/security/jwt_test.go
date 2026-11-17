@@ -14,7 +14,7 @@ const testSecret = "0123456789abcdef0123456789abcdef"
 
 func TestTokenManager_RoundTrip(t *testing.T) {
 	m := NewTokenManager(testSecret, time.Hour)
-	want := entity.Actor{UserID: 5, EmployeeID: 9, Role: entity.RoleAdmin}
+	want := entity.Actor{UserID: 5, EmployeeID: 9, Role: entity.RoleAdmin, MustChangePassword: true}
 
 	tok, exp, err := m.Issue(want)
 	require.NoError(t, err)
@@ -54,4 +54,18 @@ func TestPassword(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, CheckPassword(h, "demo1234"))
 	assert.False(t, CheckPassword(h, "wrong"))
+}
+
+func TestTempPassword(t *testing.T) {
+	seen := map[string]bool{}
+	for range 50 {
+		p, err := TempPassword()
+		require.NoError(t, err)
+		assert.Len(t, p, 12)
+		assert.NoError(t, entity.ValidateNewPassword("p", p), p)
+		assert.NotContains(t, p, "0")
+		assert.NotContains(t, p, "l")
+		seen[p] = true
+	}
+	assert.Len(t, seen, 50, "no repeats")
 }

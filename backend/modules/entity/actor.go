@@ -6,6 +6,8 @@ type Actor struct {
 	UserID     int64
 	EmployeeID int64 // 0 when the account has no employee profile
 	Role       Role
+	// MustChangePassword is set while the account uses a temporary password.
+	MustChangePassword bool
 }
 
 func (a Actor) IsAdmin() bool { return a.Role == RoleAdmin }

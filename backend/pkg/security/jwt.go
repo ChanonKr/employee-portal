@@ -12,8 +12,9 @@ import (
 )
 
 type claims struct {
-	EmployeeID int64       `json:"emp,omitempty"`
-	Role       entity.Role `json:"role"`
+	EmployeeID         int64       `json:"emp,omitempty"`
+	Role               entity.Role `json:"role"`
+	MustChangePassword bool        `json:"mcp,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -33,8 +34,9 @@ func (m *TokenManager) Issue(a entity.Actor) (string, time.Time, error) {
 	now := m.now()
 	exp := now.Add(m.ttl)
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
-		EmployeeID: a.EmployeeID,
-		Role:       a.Role,
+		EmployeeID:         a.EmployeeID,
+		Role:               a.Role,
+		MustChangePassword: a.MustChangePassword,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.FormatInt(a.UserID, 10),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -65,5 +67,5 @@ func (m *TokenManager) Parse(token string) (entity.Actor, error) {
 	if c.Role != entity.RoleEmployee && c.Role != entity.RoleAdmin {
 		return entity.Actor{}, errors.Join(entity.ErrUnauthorized, errors.New("unknown role"))
 	}
-	return entity.Actor{UserID: uid, EmployeeID: c.EmployeeID, Role: c.Role}, nil
+	return entity.Actor{UserID: uid, EmployeeID: c.EmployeeID, Role: c.Role, MustChangePassword: c.MustChangePassword}, nil
 }
