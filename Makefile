@@ -3,7 +3,7 @@ MIGRATE_IMAGE := migrate/migrate:v4.19.1
 OWNER_DB_URL  := postgres://owner:owner@localhost:5432/portal?sslmode=disable
 BACKEND       := backend
 
-.PHONY: help env up down reset logs migrate-up migrate-down sqlc sqlc-check run web test test-integration test-web vet
+.PHONY: help env up down reset logs migrate-up migrate-down sqlc sqlc-check run web test test-integration test-web e2e vet
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-18s %s\n",$$1,$$2}'
@@ -45,6 +45,11 @@ web: ## Run the frontend dev server (proxies /api to localhost:8080)
 
 test-web: ## Frontend typecheck + unit tests
 	cd frontend && npm run typecheck && npm test
+
+e2e: env ## End-to-end tests (Playwright: desktop, iPhone 13, iPad) against the full stack
+	LOGIN_RATE_LIMIT=1000 docker compose up -d --build
+	@for i in $$(seq 1 60); do curl -fs localhost:5173/api/v1/healthz >/dev/null && break; sleep 2; done
+	cd frontend && npx playwright install chromium && npx playwright test
 
 vet: ## go vet (including integration tests)
 	cd $(BACKEND) && go vet -tags integration ./...
