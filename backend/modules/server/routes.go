@@ -15,101 +15,53 @@ import (
 	"employee-portal/modules/profile"
 	"employee-portal/modules/setting"
 	"employee-portal/modules/skill"
+	"employee-portal/pkg/database"
 	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/middleware"
+	"employee-portal/pkg/router"
 )
 
-// multipartOverhead leaves room for multipart headers around the file itself.
-const multipartOverhead = 64 << 10
-
-// routes wires each module: repository → usecase → handler → route group.
-// This is the only place that knows about every layer.
+// routes builds the shared groups and middleware, wires each module
+// (repository → use case → handler) and lets the module register its own routes.
+// This is the only place that knows about every module.
 func (s *Server) routes() {
-	// JSON endpoints get a small body limit. The photo upload is registered on its
-	// own group below with a limit sized for the file.
+	// JSON endpoints get a small body limit. The photo upload uses Root and sets its own.
 	api := s.engine.Group("/api/v1", middleware.BodyLimit(jsonBodyLimit))
 	api.GET("/healthz", s.health)
 
-	// signedIn: valid session. ready: also not using a temporary password.
-	// /auth/* only needs signedIn, so a user can still see who they are and change it.
 	signedIn := middleware.Auth(s.tokens)
 	ready := middleware.RequirePasswordChanged()
-
-	// ── auth
-	authH := auth.NewHandler(
-		auth.NewUsecase(auth.NewRepository(s.pool), s.tokens),
-		auth.CookieOptions{Secure: s.cfg.IsProduction()},
-	)
-	loginPerMinute := s.cfg.LoginRateLimit
-	if loginPerMinute < 1 {
-		loginPerMinute = 5 // zero value (e.g. a Config built in tests)
+	r := router.Groups{
+		Root:     &s.engine.RouterGroup,
+		API:      api,
+		Admin:    api.Group("/admin", signedIn, ready, middleware.RequireRole(entity.RoleAdmin)), // use cases check again
+		SignedIn: signedIn,
+		Ready:    ready,
 	}
-	loginLimiter := middleware.NewKeyedLimiter(loginPerMinute, time.Minute)
 
-	a := api.Group("/auth")
-	a.POST("/login", middleware.RateLimit(loginLimiter, middleware.ByIP), authH.Login)
-	a.POST("/logout", authH.Logout)
-	a.GET("/me", signedIn, authH.Me)
-	a.POST("/change-password", signedIn, middleware.RateLimit(loginLimiter, middleware.ByUser), authH.ChangePassword)
+	auth.NewHandler(
+		auth.NewUsecase(auth.NewRepository(s.db), s.tokens),
+		auth.CookieOptions{Secure: s.cfg.IsProduction()},
+	).RegisterRoutes(r, s.cfg.LoginRateLimit)
 
-	// ── profile (employee id always comes from the token; the URL has no id)
-	profileH := profile.NewHandler(profile.NewUsecase(profile.Deps{
-		Repo:   profile.NewRepository(s.pool),
+	profile.NewHandler(profile.NewUsecase(profile.Deps{
+		Repo:   profile.NewRepository(s.db),
 		Photos: imaging.NewProcessor(s.cfg.UploadMaxBytes),
 		Files:  s.files,
 		Log:    s.log,
-	}))
+	})).RegisterRoutes(r, s.cfg.UploadMaxBytes)
 
-	p := api.Group("/profile", signedIn, ready, middleware.RequireProfile())
-	p.GET("", profileH.GetProfile)
-	p.PUT("/contact/:field", profileH.UpdateContact)
-	p.PUT("/skills", profileH.SetSkills)
-	// No route changes the name: F2 is enforced by the server, not only the UI.
-
-	uploadLimiter := middleware.NewKeyedLimiter(10, time.Minute)
-	upload := s.engine.Group("/api/v1/profile",
-		middleware.BodyLimit(s.cfg.UploadMaxBytes+multipartOverhead),
-		signedIn, ready, middleware.RequireProfile(),
-		middleware.RateLimit(uploadLimiter, middleware.ByUser))
-	upload.PUT("/photo", profileH.UpdatePhoto)
-
-	// ── files
-	fileH := file.NewHandler(s.files)
-	api.GET("/files/photos/:name", signedIn, ready, fileH.Photo)
-
-	// ── history (read-only; writes happen inside the profile transactions)
-	historyH := history.NewHandler(history.NewUsecase(history.NewRepository(s.pool), s.cfg.HistoryDays))
-	p.GET("/history", historyH.ListOwn)
-
-	// ── skill catalog (picker)
-	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.pool)))
-	api.GET("/skills", signedIn, ready, skillH.List)
-
-	// ── admin (router checks the role; every admin use case checks it again)
-	settingH := setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.pool), s.cfg.HistoryDays))
-
-	admin := api.Group("/admin", signedIn, ready, middleware.RequireRole(entity.RoleAdmin))
-	admin.GET("/skills", skillH.AdminList)
-	admin.POST("/skills", skillH.Create)
-	admin.PATCH("/skills/:id", skillH.Update)
-	admin.PUT("/skills/order", skillH.Reorder)
-	admin.GET("/settings", settingH.Get)
-	admin.PUT("/settings/history-days", settingH.SetHistoryDays)
-
-	employeeH := employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.pool)))
-	admin.GET("/stats", employeeH.Stats)
-	admin.GET("/employees", employeeH.List)
-	admin.GET("/employees/:id", employeeH.Get)
-	admin.GET("/employees/:id/history", historyH.AdminList)
-	admin.PUT("/employees/:id/name", profileH.AdminUpdateName)
-	admin.POST("/employees", authH.AdminCreateAccount)
-	admin.POST("/employees/:id/reset-password", authH.AdminResetPassword)
+	history.NewHandler(history.NewUsecase(history.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
+	skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.db))).RegisterRoutes(r)
+	setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
+	employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.db))).RegisterRoutes(r)
+	file.NewHandler(s.files).RegisterRoutes(r)
 }
 
 func (s *Server) health(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
-	if err := s.pool.Ping(ctx); err != nil {
+	if err := database.Ping(ctx, s.db); err != nil {
 		s.log.WarnContext(ctx, "health check: database unreachable", "error", err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "db": "down"})
 		return

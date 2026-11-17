@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/gorm"
 
 	"employee-portal/modules/entity"
 )
@@ -17,12 +17,12 @@ const (
 	codeForeignKeyViolation = "23503"
 )
 
-// MapError turns driver errors into domain errors so use cases never see pgx types.
+// MapError turns driver errors into domain errors so use cases never see GORM or pgx types.
 func MapError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return entity.ErrNotFound
 	}
 	var pgErr *pgconn.PgError

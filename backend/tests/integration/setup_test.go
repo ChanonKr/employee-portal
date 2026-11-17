@@ -21,6 +21,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"gorm.io/gorm"
 
 	"employee-portal/modules/profile"
 	"employee-portal/pkg/database"
@@ -29,8 +30,9 @@ import (
 )
 
 var (
-	ownerPool *pgxpool.Pool // schema owner: used to arrange test data
-	appPool   *pgxpool.Pool // role "app": what the API uses in production
+	ownerPool *pgxpool.Pool // schema owner: raw SQL to arrange and inspect test data
+	appPool   *pgxpool.Pool // role "app", raw SQL: checks what the role may not do
+	appDB     *gorm.DB      // role "app" through GORM: what the API uses in production
 )
 
 func TestMain(m *testing.M) {
@@ -69,7 +71,7 @@ func run(m *testing.M) int {
 		return 1
 	}
 
-	if ownerPool, err = database.NewPool(ctx, ownerURL); err != nil {
+	if ownerPool, err = pgxpool.New(ctx, ownerURL); err != nil {
 		log.Printf("owner pool: %v", err)
 		return 1
 	}
@@ -83,11 +85,16 @@ func run(m *testing.M) int {
 	host, _ := ctr.Host(ctx)
 	port, _ := ctr.MappedPort(ctx, "5432/tcp")
 	appURL := fmt.Sprintf("postgres://app:app@%s:%s/portal?sslmode=disable", host, port.Port())
-	if appPool, err = database.NewPool(ctx, appURL); err != nil {
+	if appPool, err = pgxpool.New(ctx, appURL); err != nil {
 		log.Printf("app pool: %v", err)
 		return 1
 	}
 	defer appPool.Close()
+	if appDB, err = database.Open(ctx, appURL); err != nil {
+		log.Printf("app gorm: %v", err)
+		return 1
+	}
+	defer database.Close(appDB)
 
 	return m.Run()
 }
@@ -136,7 +143,7 @@ func newProfileUsecaseWithDir(t *testing.T) (profile.Usecase, string) {
 		t.Fatalf("storage: %v", err)
 	}
 	return profile.NewUsecase(profile.Deps{
-		Repo:   profile.NewRepository(appPool),
+		Repo:   profile.NewRepository(appDB),
 		Photos: imaging.NewProcessor(5 << 20),
 		Files:  files,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),

@@ -3,76 +3,81 @@ package auth
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/sqlc"
 )
 
 type repository struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
+	db *gorm.DB
 }
 
-func NewRepository(pool *pgxpool.Pool) Repository {
-	return &repository{pool: pool, q: sqlc.New(pool)}
+func NewRepository(db *gorm.DB) Repository {
+	return &repository{db: db}
+}
+
+// userRow is a user with the id of their profile (none for accounts without one).
+// The model is a named, embedded field: GORM skips anonymous fields of unexported types.
+type userRow struct {
+	User       userModel `gorm:"embedded"`
+	EmployeeID *int64
+}
+
+func (r *repository) getUser(ctx context.Context, where string, arg any) (entity.User, error) {
+	var row userRow
+	err := r.db.WithContext(ctx).Model(&userModel{}).
+		Select("users.*, employees.id AS employee_id").
+		Joins("LEFT JOIN employees ON employees.user_id = users.id").
+		Where(where, arg).
+		Take(&row).Error
+	if err != nil {
+		return entity.User{}, database.MapError(err)
+	}
+	u := row.User
+	return entity.User{
+		ID: u.ID, EmployeeCode: u.EmployeeCode, PasswordHash: u.PasswordHash,
+		Role: entity.Role(u.Role), IsActive: u.IsActive,
+		MustChangePassword: u.MustChangePassword, EmployeeID: row.EmployeeID,
+	}, nil
 }
 
 func (r *repository) GetUserByCode(ctx context.Context, code string) (entity.User, error) {
-	row, err := r.q.GetUserByCode(ctx, code)
-	if err != nil {
-		return entity.User{}, database.MapError(err)
-	}
-	return entity.User{
-		ID: row.ID, EmployeeCode: row.EmployeeCode, PasswordHash: row.PasswordHash,
-		Role: entity.Role(row.Role), IsActive: row.IsActive,
-		MustChangePassword: row.MustChangePassword, EmployeeID: row.EmployeeID,
-	}, nil
+	return r.getUser(ctx, "users.employee_code = ?", code)
 }
 
 func (r *repository) GetUserByID(ctx context.Context, id int64) (entity.User, error) {
-	row, err := r.q.GetUserByID(ctx, id)
-	if err != nil {
-		return entity.User{}, database.MapError(err)
-	}
-	return entity.User{
-		ID: row.ID, EmployeeCode: row.EmployeeCode, PasswordHash: row.PasswordHash,
-		Role: entity.Role(row.Role), IsActive: row.IsActive,
-		MustChangePassword: row.MustChangePassword, EmployeeID: row.EmployeeID,
-	}, nil
+	return r.getUser(ctx, "users.id = ?", id)
 }
 
 func (r *repository) CreateAccount(ctx context.Context, a entity.NewAccount, passwordHash string) (int64, int64, error) {
-	var userID, employeeID int64
-	err := database.WithTx(ctx, r.pool, func(q *sqlc.Queries) error {
-		var err error
-		userID, err = q.CreateUser(ctx, sqlc.CreateUserParams{
-			EmployeeCode: a.EmployeeCode, PasswordHash: passwordHash, Role: string(a.Role),
-		})
-		if err != nil {
+	// New accounts must change the temporary password on first sign-in.
+	u := userModel{EmployeeCode: a.EmployeeCode, PasswordHash: passwordHash, Role: string(a.Role), MustChangePassword: true}
+	e := employeeModel{FirstName: a.FirstName, LastName: a.LastName}
+	err := database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		if err := tx.Create(&u).Error; err != nil {
 			return database.MapError(err)
 		}
-		employeeID, err = q.CreateEmployee(ctx, sqlc.CreateEmployeeParams{
-			UserID: userID, FirstName: a.FirstName, LastName: a.LastName,
-		})
-		return database.MapError(err)
+		e.UserID = u.ID
+		return database.MapError(tx.Create(&e).Error)
 	})
-	return userID, employeeID, err
+	return u.ID, e.ID, err
 }
 
 func (r *repository) SetPassword(ctx context.Context, userID int64, passwordHash string, mustChange bool) error {
-	n, err := r.q.SetPassword(ctx, sqlc.SetPasswordParams{ID: userID, PasswordHash: passwordHash, MustChangePassword: mustChange})
-	if err != nil {
-		return database.MapError(err)
+	res := r.db.WithContext(ctx).Model(&userModel{}).Where("id = ?", userID).
+		Updates(map[string]any{"password_hash": passwordHash, "must_change_password": mustChange})
+	if res.Error != nil {
+		return database.MapError(res.Error)
 	}
-	if n == 0 {
+	if res.RowsAffected == 0 {
 		return entity.ErrNotFound
 	}
 	return nil
 }
 
 func (r *repository) UserIDByEmployee(ctx context.Context, employeeID int64) (int64, error) {
-	id, err := r.q.GetUserIDByEmployee(ctx, employeeID)
-	return id, database.MapError(err)
+	var e employeeModel
+	err := r.db.WithContext(ctx).Select("user_id").Take(&e, employeeID).Error
+	return e.UserID, database.MapError(err)
 }

@@ -35,13 +35,13 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
+	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	defer database.Close(db)
 
-	srv, err := server.New(cfg, log, pool)
+	srv, err := server.New(cfg, log, db)
 	if err != nil {
 		return err
 	}
