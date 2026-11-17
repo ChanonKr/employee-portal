@@ -5,37 +5,24 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"employee-portal/configs"
-	"employee-portal/modules/server"
 )
 
 // End-to-end through the real router: login → GET /profile → PUT contact.
 func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 	_, _, code := newEmployee(t, "0811111111")
 
-	srv, err := server.New(configs.Config{
-		JWTSecret: "integration-test-secret-0123456789", JWTTTL: 3600e9, HistoryDays: 7,
-		CORSOrigins: []string{"http://localhost:5173"},
-		UploadDir:   t.TempDir(), UploadMaxBytes: 5 << 20,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)), appPool)
-	require.NoError(t, err)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
+	baseURL := newTestServer(t)
 
 	do := func(method, path, body string, headers map[string]string, cookies []*http.Cookie) *http.Response {
-		req, _ := http.NewRequest(method, ts.URL+path, bytes.NewBufferString(body))
+		req, _ := http.NewRequest(method, baseURL+path, bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		for k, v := range headers {
 			req.Header.Set(k, v)
@@ -186,7 +173,7 @@ func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 		part, _ := mw.CreateFormFile("file", "me.jpg")
 		_, _ = part.Write(content)
 		_ = mw.Close()
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/profile/photo", &body)
+		req, _ := http.NewRequest("PUT", baseURL+"/api/v1/profile/photo", &body)
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		req.Header.Set("If-Match", version)
 		for _, c := range cookies {

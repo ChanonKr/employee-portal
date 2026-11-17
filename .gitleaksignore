@@ -1,0 +1,4 @@
+# Test-only JWT secret in early commits. It is no longer in the code (tests now
+# generate a random secret at runtime) and never protected anything real.
+2e92d4673514e942e52bb3549afd8d5d0aeaa50a:backend/tests/integration/client_test.go:generic-api-key:30
+a52d900b251042ad2562da5dbb8288d47efc8585:backend/tests/integration/http_test.go:generic-api-key:26

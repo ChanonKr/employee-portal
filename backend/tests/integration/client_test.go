@@ -4,6 +4,8 @@ package integration
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -27,7 +29,7 @@ type apiClient struct {
 func newTestServer(t *testing.T) string {
 	t.Helper()
 	srv, err := server.New(configs.Config{
-		JWTSecret: "integration-test-secret-0123456789", JWTTTL: 3600e9, HistoryDays: 7,
+		JWTSecret: randomSecret(t), JWTTTL: 3600e9, HistoryDays: 7,
 		CORSOrigins: []string{"http://localhost:5173"},
 		UploadDir:   t.TempDir(), UploadMaxBytes: 5 << 20,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), appPool)
@@ -75,6 +77,15 @@ func decodeJSON[T any](t *testing.T, res *http.Response) T {
 	var v T
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&v))
 	return v
+}
+
+// randomSecret avoids a hard-coded secret in the repository (and secret-scanner noise).
+func randomSecret(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	require.NoError(t, err)
+	return hex.EncodeToString(b)
 }
 
 // newAdmin inserts an admin account (with a profile row) and returns its code.
