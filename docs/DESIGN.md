@@ -718,7 +718,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 |---|---|---|
 | แก้ contact | inline edit | bottom Drawer (คีย์บอร์ดไม่บัง) |
 | เลือก skills | Popover + Command search | Drawer เต็มจอ + search |
-| อัปโหลดรูป | drag & drop + ปุ่ม → แสดงตัวอย่างก่อน แล้วกด **Save photo** ถึงอัปโหลด (Cancel ทิ้งได้ — วางไฟล์พลาดไม่เปลี่ยนรูป) | ปุ่ม (กล้อง/คลังรูป) `accept="image/*"` → ตัวอย่าง + Save photo เหมือนกัน |
+| อัปโหลดรูป | ปุ่ม (ไม่มี drag & drop) → แสดงตัวอย่างก่อน แล้วกด **Save photo** ถึงอัปโหลด (Cancel ทิ้งได้) | ปุ่ม (กล้อง/คลังรูป) `accept="image/*"` → ตัวอย่าง + Save photo เหมือนกัน |
 | History / ตาราง admin | ตาราง | การ์ด |
 
 - สลับ Dialog ↔ Drawer ด้วย hook `useMediaQuery('(min-width: 768px)')`

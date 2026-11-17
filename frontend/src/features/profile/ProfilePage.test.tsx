@@ -99,17 +99,17 @@ describe('checklist', () => {
     expect(checklist(full).find((i) => i.label === 'Contact info')?.done).toBe(true)
   })
 
-  it('a dropped photo is only previewed; it uploads after "Save photo" and Cancel discards it', async () => {
+  it('a chosen photo is only previewed; it uploads after "Save photo" and Cancel discards it', async () => {
     // jsdom has no object URLs.
     URL.createObjectURL = () => 'blob:preview'
     URL.revokeObjectURL = () => {}
     const fetch = server(empty, () => ({ status: 200, body: { version: 2, photoUrl: '/api/v1/files/photos/x.jpg' } }))
     renderRoute(<ProfilePage />)
-    const target = (await screen.findByRole('button', { name: 'Add photo' })).parentElement!
+    await screen.findByRole('button', { name: 'Add photo' })
     const file = new File(['x'], 'me.png', { type: 'image/png' })
     const puts = () => fetch.mock.calls.filter(([, i]) => i?.method === 'PUT')
 
-    fireEvent.drop(target, { dataTransfer: { files: [file] } })
+    await userEvent.upload(screen.getByLabelText('Profile photo'), file)
     expect(await screen.findByRole('button', { name: 'Save photo' })).toBeInTheDocument()
     expect(puts()).toHaveLength(0)
 
@@ -117,9 +117,18 @@ describe('checklist', () => {
     expect(screen.queryByRole('button', { name: 'Save photo' })).not.toBeInTheDocument()
     expect(puts()).toHaveLength(0)
 
-    fireEvent.drop(screen.getByRole('button', { name: 'Add photo' }).parentElement!, { dataTransfer: { files: [file] } })
+    await userEvent.upload(screen.getByLabelText('Profile photo'), file)
     await userEvent.click(await screen.findByRole('button', { name: 'Save photo' }))
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.[0]).toBe('/api/v1/profile/photo')
+  })
+
+  it('dropping a file on the picture does nothing', async () => {
+    const fetch = server(empty)
+    renderRoute(<ProfilePage />)
+    const picture = (await screen.findByRole('button', { name: 'Add photo' })).parentElement!
+    fireEvent.drop(picture, { dataTransfer: { files: [new File(['x'], 'me.png', { type: 'image/png' })] } })
+    expect(screen.queryByRole('button', { name: 'Save photo' })).not.toBeInTheDocument()
+    expect(fetch.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(false)
   })
 })

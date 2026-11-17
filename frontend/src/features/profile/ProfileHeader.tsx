@@ -1,12 +1,11 @@
 import { Camera, Loader2, Lock } from 'lucide-react'
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/client'
 import type { Profile } from '@/api/types'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { cn } from '@/lib/cn'
 import { useUploadPhoto } from './api'
 
 const MAX_BYTES = 5 * 1024 * 1024
@@ -22,9 +21,7 @@ export function checkPhoto(file: File): string | null {
 export function ProfileHeader({ profile }: { profile: Profile }) {
   const input = useRef<HTMLInputElement>(null)
   const upload = useUploadPhoto()
-  const [dragging, setDragging] = useState(false)
-  // A chosen or dropped file waits here as a preview until the user saves it,
-  // so a stray drop never replaces the photo.
+  // A chosen file waits here as a preview until the user saves it.
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
 
   useEffect(() => () => {
@@ -52,25 +49,11 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
     })
   }
 
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault()
-    setDragging(false)
-    if (!upload.isPending) choose(e.dataTransfer.files[0])
-  }
-
   const hasPhoto = !!profile.photoUrl || !!pending
 
   return (
     <Card className="flex flex-col items-center gap-4 text-center">
-      <div
-        className={cn('relative rounded-full', dragging && 'ring-4 ring-accent/40')}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-      >
+      <div className="relative rounded-full">
         {hasPhoto ? (
           <Avatar url={pending?.url ?? profile.photoUrl} firstName={profile.firstName} lastName={profile.lastName} className="size-28" />
         ) : (
@@ -138,7 +121,7 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
         <p className="mt-0.5 text-sm text-muted">{profile.employeeCode}</p>
         <p className="mt-2 text-xs text-muted">Your name comes from HR records. Contact HR to change it.</p>
       </div>
-      <p className="hidden text-xs text-muted md:block">Drag a photo onto the picture to preview it, then save. JPEG, PNG or WebP, up to 5 MB.</p>
+      <p className="text-xs text-muted">JPEG, PNG or WebP, up to 5 MB.</p>
     </Card>
   )
 }
