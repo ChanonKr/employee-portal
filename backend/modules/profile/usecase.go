@@ -92,8 +92,9 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 }
 
 // SetSkills replaces the employee's whole skill set in one request:
-// lock row → check version → validate ids → replace → version + 1 → log if the set changed.
+// lock row → load current + requested skills → apply domain rule → replace → version + 1 → log if changed.
 func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, error) {
+	// Reject a malformed list before opening a transaction (ChangeSkills checks it again).
 	if err := entity.ValidateSkillIDs(in.SkillIDs); err != nil {
 		return 0, err
 	}
@@ -104,10 +105,6 @@ func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, erro
 		if err != nil {
 			return err
 		}
-		if err := emp.CheckVersion(in.Version); err != nil {
-			return err
-		}
-
 		current, err := tx.ListEmployeeSkills(ctx, emp.ID)
 		if err != nil {
 			return err
@@ -116,20 +113,20 @@ func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, erro
 		if err != nil {
 			return err
 		}
-		if err := entity.CheckSkillSelection(in.SkillIDs, selected, current); err != nil {
+		change, err := emp.ChangeSkills(in.SkillIDs, current, selected, in.Version)
+		if err != nil {
 			return err
 		}
-
 		if err := tx.ReplaceSkills(ctx, emp.ID, in.SkillIDs); err != nil {
 			return err
 		}
 		if newVersion, err = tx.BumpVersion(ctx, emp); err != nil {
 			return err
 		}
-		if change := entity.SkillsChange(current, selected); change != nil {
-			return tx.AppendChange(ctx, emp.ID, *change, in.Actor)
+		if change == nil {
+			return nil
 		}
-		return nil
+		return tx.AppendChange(ctx, emp.ID, *change, in.Actor)
 	})
 	if err != nil {
 		return 0, err

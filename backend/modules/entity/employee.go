@@ -75,3 +75,24 @@ func (e *Employee) ChangeContact(f ContactField, raw string, expectedVersion int
 	}
 	return &Change{Field: f.LogField(), Old: old, New: v}, nil
 }
+
+// ChangeSkills checks a request to replace the employee's whole skill set.
+// Skills live outside the employees row, so the caller loads them under the row
+// lock and passes them in:
+//   - current:  the skills the employee has now
+//   - selected: the catalog entries for the requested ids (active or not)
+//
+// It returns the Change to record, or nil when the set is the same
+// (the version still increments on save, but no history entry is written).
+func (e *Employee) ChangeSkills(requested []int64, current, selected []Skill, expectedVersion int32) (*Change, error) {
+	if err := ValidateSkillIDs(requested); err != nil {
+		return nil, err
+	}
+	if err := e.CheckVersion(expectedVersion); err != nil {
+		return nil, err
+	}
+	if err := checkSkillSelection(requested, selected, current); err != nil {
+		return nil, err
+	}
+	return skillsChange(current, selected), nil
+}

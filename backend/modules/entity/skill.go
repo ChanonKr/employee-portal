@@ -30,10 +30,10 @@ func ValidateSkillIDs(ids []int64) error {
 	return nil
 }
 
-// CheckSkillSelection verifies the requested ids against the skills found in the
+// checkSkillSelection verifies the requested ids against the skills found in the
 // catalog. Every id must exist. An inactive skill is allowed only if the employee
 // already has it, so turning a skill off never forces anyone to lose it.
-func CheckSkillSelection(requested []int64, found, current []Skill) error {
+func checkSkillSelection(requested []int64, found, current []Skill) error {
 	byID := make(map[int64]Skill, len(found))
 	for _, s := range found {
 		byID[s.ID] = s
@@ -54,9 +54,9 @@ func CheckSkillSelection(requested []int64, found, current []Skill) error {
 	return nil
 }
 
-// SkillsChange returns the history entry for replacing old with next, or nil when
+// skillsChange returns the history entry for replacing old with next, or nil when
 // both contain the same skills (order does not matter).
-func SkillsChange(old, next []Skill) *Change {
+func skillsChange(old, next []Skill) *Change {
 	if sameSkillSet(old, next) {
 		return nil
 	}
