@@ -9,6 +9,25 @@ import (
 	"context"
 )
 
+const bumpVersion = `-- name: BumpVersion :one
+UPDATE employees SET version = version + 1, updated_at = now()
+WHERE id = $1 AND version = $2
+RETURNING version
+`
+
+type BumpVersionParams struct {
+	ID      int64
+	Version int32
+}
+
+// For edits stored outside the employees row (skills), so ETag/If-Match still work.
+func (q *Queries) BumpVersion(ctx context.Context, arg BumpVersionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, bumpVersion, arg.ID, arg.Version)
+	var version int32
+	err := row.Scan(&version)
+	return version, err
+}
+
 const getProfile = `-- name: GetProfile :one
 SELECT e.id, e.user_id, e.first_name, e.last_name, e.photo_path, e.mobile_phone, e.contact_email, e.address, e.version, e.updated_at, u.employee_code
 FROM employees e

@@ -9,8 +9,100 @@ import (
 	"context"
 )
 
+const deleteEmployeeSkills = `-- name: DeleteEmployeeSkills :exec
+DELETE FROM employee_skills WHERE employee_id = $1
+`
+
+func (q *Queries) DeleteEmployeeSkills(ctx context.Context, employeeID int64) error {
+	_, err := q.db.Exec(ctx, deleteEmployeeSkills, employeeID)
+	return err
+}
+
+const getSkillsByIDs = `-- name: GetSkillsByIDs :many
+SELECT id, name, is_active
+FROM skills
+WHERE id = ANY($1::bigint[])
+ORDER BY sort_order, name
+`
+
+type GetSkillsByIDsRow struct {
+	ID       int64
+	Name     string
+	IsActive bool
+}
+
+// Includes inactive skills so the use case can tell "unknown" from "inactive".
+func (q *Queries) GetSkillsByIDs(ctx context.Context, ids []int64) ([]GetSkillsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getSkillsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetSkillsByIDsRow{}
+	for rows.Next() {
+		var i GetSkillsByIDsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.IsActive); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertEmployeeSkills = `-- name: InsertEmployeeSkills :exec
+INSERT INTO employee_skills (employee_id, skill_id)
+SELECT $1, unnest($2::bigint[])
+`
+
+type InsertEmployeeSkillsParams struct {
+	EmployeeID int64
+	SkillIds   []int64
+}
+
+func (q *Queries) InsertEmployeeSkills(ctx context.Context, arg InsertEmployeeSkillsParams) error {
+	_, err := q.db.Exec(ctx, insertEmployeeSkills, arg.EmployeeID, arg.SkillIds)
+	return err
+}
+
+const listActiveSkills = `-- name: ListActiveSkills :many
+SELECT id, name, is_active
+FROM skills
+WHERE is_active
+ORDER BY sort_order, name
+`
+
+type ListActiveSkillsRow struct {
+	ID       int64
+	Name     string
+	IsActive bool
+}
+
+// The picker catalog.
+func (q *Queries) ListActiveSkills(ctx context.Context) ([]ListActiveSkillsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveSkills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveSkillsRow{}
+	for rows.Next() {
+		var i ListActiveSkillsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.IsActive); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEmployeeSkills = `-- name: ListEmployeeSkills :many
-SELECT s.id, s.name
+SELECT s.id, s.name, s.is_active
 FROM employee_skills es
 JOIN skills s ON s.id = es.skill_id
 WHERE es.employee_id = $1
@@ -18,8 +110,9 @@ ORDER BY s.sort_order, s.name
 `
 
 type ListEmployeeSkillsRow struct {
-	ID   int64
-	Name string
+	ID       int64
+	Name     string
+	IsActive bool
 }
 
 func (q *Queries) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]ListEmployeeSkillsRow, error) {
@@ -31,7 +124,7 @@ func (q *Queries) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]L
 	items := []ListEmployeeSkillsRow{}
 	for rows.Next() {
 		var i ListEmployeeSkillsRow
-		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+		if err := rows.Scan(&i.ID, &i.Name, &i.IsActive); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

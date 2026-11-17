@@ -3,6 +3,8 @@
 
 INSERT INTO app_settings (key, value) VALUES ('history_days', '7');
 
+-- Skill catalog. Change it later with a new migration or Admin → Skills.
+-- Skills are never deleted: set is_active = FALSE so employees who have one keep it.
 INSERT INTO skills (name, sort_order) VALUES
   ('Go', 1), ('React', 2), ('Flutter', 3), ('CI/CD', 4),
   ('Docker', 5), ('Kubernetes', 6), ('PostgreSQL', 7), ('TypeScript', 8);

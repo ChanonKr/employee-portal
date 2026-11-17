@@ -19,6 +19,13 @@ type TxRepository interface {
 	GetForUpdate(ctx context.Context, employeeID int64) (entity.Employee, error)
 	SaveContact(ctx context.Context, e entity.Employee, f entity.ContactField) (newVersion int32, err error)
 	AppendChange(ctx context.Context, employeeID int64, c entity.Change, by entity.Actor) error
+
+	ListEmployeeSkills(ctx context.Context, employeeID int64) ([]entity.Skill, error)
+	// GetSkillsByIDs returns the matching skills, active or not, in display order.
+	GetSkillsByIDs(ctx context.Context, ids []int64) ([]entity.Skill, error)
+	ReplaceSkills(ctx context.Context, employeeID int64, skillIDs []int64) error
+	// BumpVersion increments the version for edits stored outside the employees row.
+	BumpVersion(ctx context.Context, e entity.Employee) (newVersion int32, err error)
 }
 
 type UpdateContactInput struct {
@@ -28,9 +35,16 @@ type UpdateContactInput struct {
 	Version int32 // from If-Match
 }
 
+type SetSkillsInput struct {
+	Actor    entity.Actor
+	SkillIDs []int64
+	Version  int32 // from If-Match
+}
+
 type Usecase interface {
 	GetProfile(ctx context.Context, actor entity.Actor) (entity.Profile, error)
 	UpdateContact(ctx context.Context, in UpdateContactInput) (newVersion int32, err error)
+	SetSkills(ctx context.Context, in SetSkillsInput) (newVersion int32, err error)
 }
 
 type usecase struct {
@@ -70,6 +84,52 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 			return nil
 		}
 		return tx.AppendChange(ctx, emp.ID, *change, in.Actor)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return newVersion, nil
+}
+
+// SetSkills replaces the employee's whole skill set in one request:
+// lock row → check version → validate ids → replace → version + 1 → log if the set changed.
+func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, error) {
+	if err := entity.ValidateSkillIDs(in.SkillIDs); err != nil {
+		return 0, err
+	}
+
+	var newVersion int32
+	err := u.repo.WithTx(ctx, func(tx TxRepository) error {
+		emp, err := tx.GetForUpdate(ctx, in.Actor.EmployeeID)
+		if err != nil {
+			return err
+		}
+		if err := emp.CheckVersion(in.Version); err != nil {
+			return err
+		}
+
+		current, err := tx.ListEmployeeSkills(ctx, emp.ID)
+		if err != nil {
+			return err
+		}
+		selected, err := tx.GetSkillsByIDs(ctx, in.SkillIDs)
+		if err != nil {
+			return err
+		}
+		if err := entity.CheckSkillSelection(in.SkillIDs, selected, current); err != nil {
+			return err
+		}
+
+		if err := tx.ReplaceSkills(ctx, emp.ID, in.SkillIDs); err != nil {
+			return err
+		}
+		if newVersion, err = tx.BumpVersion(ctx, emp); err != nil {
+			return err
+		}
+		if change := entity.SkillsChange(current, selected); change != nil {
+			return tx.AppendChange(ctx, emp.ID, *change, in.Actor)
+		}
+		return nil
 	})
 	if err != nil {
 		return 0, err

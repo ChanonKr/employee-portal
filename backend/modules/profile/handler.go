@@ -47,6 +47,10 @@ type updateContactRequest struct {
 	Value *string `json:"value" binding:"required"`
 }
 
+type setSkillsRequest struct {
+	SkillIDs []int64 `json:"skillIds" binding:"required"` // [] clears all skills; missing is an error
+}
+
 type versionResponse struct {
 	Version int32 `json:"version"`
 }
@@ -80,6 +84,32 @@ func (h *Handler) UpdateContact(c *gin.Context) {
 		Field:   c.Param("field"),
 		Value:   *req.Value,
 		Version: version,
+	})
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	c.Header("ETag", httputil.ETag(v))
+	c.JSON(http.StatusOK, versionResponse{Version: v})
+}
+
+// SetSkills: PUT /profile/skills  body {skillIds: number[]}
+func (h *Handler) SetSkills(c *gin.Context) {
+	version, err := httputil.IfMatchVersion(c)
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	var req setSkillsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httputil.WriteError(c, entity.NewValidationError("skillIds", "must be an array of skill ids"))
+		return
+	}
+
+	v, err := h.uc.SetSkills(c.Request.Context(), SetSkillsInput{
+		Actor:    middleware.ActorFrom(c),
+		SkillIDs: req.SkillIDs,
+		Version:  version,
 	})
 	if err != nil {
 		httputil.WriteError(c, err)

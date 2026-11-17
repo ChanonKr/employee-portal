@@ -46,7 +46,7 @@ func (r *repository) GetProfile(ctx context.Context, employeeID int64) (entity.P
 		Skills:       make([]entity.Skill, len(skills)),
 	}
 	for i, s := range skills {
-		p.Skills[i] = entity.Skill{ID: s.ID, Name: s.Name}
+		p.Skills[i] = entity.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
 	}
 	return p, nil
 }
@@ -104,6 +104,56 @@ func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c ent
 		NewValue:   newJSON,
 		ChangedBy:  by.UserID,
 	}))
+}
+
+func (t *txRepository) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]entity.Skill, error) {
+	rows, err := t.q.ListEmployeeSkills(ctx, employeeID)
+	if err != nil {
+		return nil, database.MapError(err)
+	}
+	skills := make([]entity.Skill, len(rows))
+	for i, r := range rows {
+		skills[i] = entity.Skill{ID: r.ID, Name: r.Name, IsActive: r.IsActive}
+	}
+	return skills, nil
+}
+
+func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]entity.Skill, error) {
+	if len(ids) == 0 {
+		return []entity.Skill{}, nil
+	}
+	rows, err := t.q.GetSkillsByIDs(ctx, ids)
+	if err != nil {
+		return nil, database.MapError(err)
+	}
+	skills := make([]entity.Skill, len(rows))
+	for i, r := range rows {
+		skills[i] = entity.Skill{ID: r.ID, Name: r.Name, IsActive: r.IsActive}
+	}
+	return skills, nil
+}
+
+func (t *txRepository) ReplaceSkills(ctx context.Context, employeeID int64, skillIDs []int64) error {
+	if err := t.q.DeleteEmployeeSkills(ctx, employeeID); err != nil {
+		return database.MapError(err)
+	}
+	if len(skillIDs) == 0 {
+		return nil
+	}
+	return database.MapError(t.q.InsertEmployeeSkills(ctx, sqlc.InsertEmployeeSkillsParams{
+		EmployeeID: employeeID, SkillIds: skillIDs,
+	}))
+}
+
+func (t *txRepository) BumpVersion(ctx context.Context, e entity.Employee) (int32, error) {
+	v, err := t.q.BumpVersion(ctx, sqlc.BumpVersionParams{ID: e.ID, Version: e.Version})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, entity.ErrConflict
+	}
+	if err != nil {
+		return 0, database.MapError(err)
+	}
+	return v, nil
 }
 
 // jsonOrNull returns nil (SQL NULL) for a nil value, otherwise its JSON encoding.

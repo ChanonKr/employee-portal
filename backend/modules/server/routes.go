@@ -9,6 +9,7 @@ import (
 
 	"employee-portal/modules/auth"
 	"employee-portal/modules/profile"
+	"employee-portal/modules/skill"
 	"employee-portal/pkg/middleware"
 )
 
@@ -38,7 +39,12 @@ func (s *Server) routes() {
 	p := api.Group("/profile", requireAuth, middleware.RequireProfile())
 	p.GET("", profileH.GetProfile)
 	p.PUT("/contact/:field", profileH.UpdateContact)
+	p.PUT("/skills", profileH.SetSkills)
 	// No route changes the name: F2 is enforced by the server, not only the UI.
+
+	// ── skill catalog (picker)
+	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.pool)))
+	api.GET("/skills", requireAuth, skillH.List)
 }
 
 func (s *Server) health(c *gin.Context) {

@@ -43,6 +43,14 @@ func (e *Employee) setContact(f ContactField, v *string) {
 	}
 }
 
+// CheckVersion enforces optimistic locking: the client must have seen the latest version.
+func (e *Employee) CheckVersion(expected int32) error {
+	if e.Version != expected {
+		return ErrConflict
+	}
+	return nil
+}
+
 // ChangeContact applies one contact edit. The caller must have loaded e under a row
 // lock. It returns the Change to record, or nil when the value did not change
 // (the version still increments on save, but no history entry is written).
@@ -51,8 +59,8 @@ func (e *Employee) ChangeContact(f ContactField, raw string, expectedVersion int
 	if err := f.Validate(v); err != nil {
 		return nil, err
 	}
-	if e.Version != expectedVersion {
-		return nil, ErrConflict
+	if err := e.CheckVersion(expectedVersion); err != nil {
+		return nil, err
 	}
 
 	current := e.Contact(f)
