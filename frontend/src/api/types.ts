@@ -47,3 +47,52 @@ export type HistoryPage = {
 }
 
 export type Version = { version: number }
+
+// ── admin
+
+export type AdminSkill = { id: number; name: string; isActive: boolean; sortOrder: number; usedBy: number }
+
+export type AdminSettings = {
+  historyDays: number
+  updatedBy: { id: number; employeeCode: string } | null
+  updatedAt: string | null
+}
+
+export type EmployeeSummary = {
+  id: number
+  employeeCode: string
+  firstName: string
+  lastName: string
+  photoUrl: string | null
+  role: Role
+  isActive: boolean
+}
+
+export type EmployeeList = {
+  items: EmployeeSummary[]
+  page: { page: number; pageSize: number; hasNext: boolean }
+  total: number
+}
+
+export type EmployeeDetail = Omit<Profile, 'skills'> & {
+  skills: (Skill & { isActive: boolean })[]
+  role: Role
+  isActive: boolean
+}
+
+export type DashboardStats = {
+  employees: number
+  completeProfiles: number
+  topSkills: { id: number; name: string; usedBy: number }[]
+  recentChanges: {
+    id: number
+    employeeId: number
+    employeeCode: string
+    name: string
+    field: HistoryField
+    changedAt: string
+    changedByRole: Role
+  }[]
+}
+
+export type CreatedAccount = { id: number; employeeCode: string; temporaryPassword: string }
