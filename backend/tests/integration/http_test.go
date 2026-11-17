@@ -137,4 +137,42 @@ func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 	res = do("GET", "/api/v1/profile", "", nil, cookies)
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&p))
 	assert.Len(t, p.Skills, 2)
+
+	// History shows both edits (mobile, skills), newest first, in the documented shape
+	res = do("GET", "/api/v1/profile/history", "", nil, cookies)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var hist struct {
+		Days     int  `json:"days"`
+		HasOlder bool `json:"hasOlder"`
+		Items    []struct {
+			Field     string          `json:"field"`
+			OldValue  json.RawMessage `json:"oldValue"`
+			NewValue  json.RawMessage `json:"newValue"`
+			ChangedAt string          `json:"changedAt"`
+			ChangedBy struct {
+				ID   int64  `json:"id"`
+				Role string `json:"role"`
+			} `json:"changedBy"`
+		} `json:"items"`
+		Page struct {
+			Page     int  `json:"page"`
+			PageSize int  `json:"pageSize"`
+			HasNext  bool `json:"hasNext"`
+		} `json:"page"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&hist))
+	assert.Equal(t, 7, hist.Days)
+	assert.False(t, hist.HasOlder)
+	require.Len(t, hist.Items, 2)
+	assert.Equal(t, "skills", hist.Items[0].Field)
+	assert.JSONEq(t, `[]`, string(hist.Items[0].OldValue))
+	assert.Equal(t, "mobile_phone", hist.Items[1].Field)
+	assert.JSONEq(t, `"0811111111"`, string(hist.Items[1].OldValue))
+	assert.Equal(t, "employee", hist.Items[1].ChangedBy.Role)
+	assert.Equal(t, 20, hist.Page.PageSize)
+
+	res = do("GET", "/api/v1/profile/history?field=mobile", "", nil, cookies)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode, "filter uses the stored field name")
+	res = do("GET", "/api/v1/profile/history?page=abc", "", nil, cookies)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }
