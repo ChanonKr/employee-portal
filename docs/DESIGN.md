@@ -95,7 +95,8 @@ employee-portal/
 │   │   ├── auth/                       # handler.go · usecase.go · usecase_test.go · repository.go
 │   │   ├── profile/                    # handler.go · usecase.go · usecase_test.go · repository.go (รวม PUT /profile/skills)
 │   │   ├── skill/                      # GET /skills (catalog สำหรับ picker)
-│   │   ├── history/ · file/ · admin/   # (ขั้นถัดไป) โครงเดียวกัน
+│   │   ├── history/                    # GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
+│   │   ├── file/ · admin/              # (ขั้นถัดไป) โครงเดียวกัน
 │   ├── pkg/
 │   │   ├── database/
 │   │   │   ├── postgres.go             # pgxpool + ping
@@ -252,21 +253,26 @@ INSERT INTO employee_skills (employee_id, skill_id)
 SELECT sqlc.arg(employee_id), unnest(sqlc.arg(skill_ids)::bigint[]);
 
 -- name: ListHistory :many
+-- days NULL = no time window (admin). field NULL = all fields.
+-- Fetch page_limit = pageSize + 1 rows to know whether a next page exists.
 SELECT l.id, l.field, l.old_value, l.new_value, l.changed_at, l.changed_by, u.role AS changed_by_role
 FROM profile_change_logs l
 JOIN users u ON u.id = l.changed_by
 WHERE l.employee_id = sqlc.arg(employee_id)
-  AND l.changed_at >= now() - make_interval(days => sqlc.arg(days)::int)
-  AND (sqlc.narg(field)::text IS NULL OR l.field = sqlc.narg(field))
+  AND (sqlc.narg(days)::int IS NULL OR l.changed_at >= now() - make_interval(days => sqlc.narg(days)::int))
+  AND (sqlc.narg(field)::text IS NULL OR l.field = sqlc.narg(field)::text)
 ORDER BY l.changed_at DESC, l.id DESC
-LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: HasOlderHistory :one
 SELECT EXISTS (
   SELECT 1 FROM profile_change_logs
-  WHERE employee_id = $1 AND changed_at < now() - make_interval(days => $2::int)
+  WHERE employee_id = sqlc.arg(employee_id)
+    AND changed_at < now() - make_interval(days => sqlc.arg(days)::int)
 );
 ```
+- `days` เป็น nullable → `/admin/employees/:id/history` ใช้ query เดียวกันได้โดยไม่จำกัดช่วงเวลา
+- `hasNext` ได้จากการดึงเกินมา 1 แถว (ไม่ต้อง `COUNT(*)`) · index `(employee_id, changed_at DESC)` รองรับทั้ง filter และ sort
 
 ### 5.4 Transaction (ตัวอย่าง: แก้ contact)
 Use case ไม่รู้จัก sqlc/pgx: เรียก `WithTx` ผ่าน interface `Repository` ที่ use case ประกาศเอง และกฎธุรกิจอยู่ใน `entity.Employee.ChangeContact`
@@ -338,7 +344,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | PUT | `/profile/photo` | ✔ | multipart `file` + `If-Match` | `{version, photoUrl}` |
 | GET | `/skills` | ✔ | – | `[{id, name}]` |
 | PUT | `/profile/skills` | ✔ | `{skillIds: number[]}` + `If-Match` | `{version}` |
-| GET | `/profile/history` | ✔ | `?field=&page=&pageSize=` | `{days, hasOlder, items: [...], page}` |
+| GET | `/profile/history` | ✔ | `?field=&page=&pageSize=` · `field` = ชื่อเดียวกับ `items[].field` (`mobile_phone`, `contact_email`, `address`, `photo`, `skills`, `first_name`, `last_name`) · `pageSize` 1–100 (default 20) | `{days, hasOlder, items: [...], page}` |
 | GET | `/files/photos/:name` | ✔ | – | image |
 | GET | `/healthz` | – | – | `{status, db}` |
 
@@ -746,6 +752,8 @@ Layout: navbar มี badge **Admin** + sidebar (Dashboard, Employees, Skills, S
 - skills มี id ที่ inactive ซึ่งพนักงานยังไม่มี → 400, ไม่มีอะไรเปลี่ยน · ถ้ามีอยู่แล้ว → เก็บไว้ได้
 - skills ชุดเดิมแต่สลับลำดับ → version +1 แต่ไม่มี log · insert log ล้มเหลว → skills ถูก rollback
 - history: log อายุ 8 วันไม่แสดงเมื่อ `history_days=7` แต่แสดงเมื่อ `=10` และ `hasOlder` ถูกต้อง
+- history: ไม่เคยแก้ → `items: []`, `hasOlder: false` · แก้นานแล้ว → `items: []`, `hasOlder: true` · เห็นเฉพาะของตัวเอง
+- history: `app_settings` ไม่มีค่าหรือค่าเสีย → ใช้ env `HISTORY_DAYS` (หน้าไม่พัง) · `?field=` ที่ไม่รู้จัก / `page` ไม่ใช่ตัวเลข / `pageSize` > 100 → 400
 - employee เรียก `/admin/*` → 403 · เรียก `AdminService` ด้วย actor ที่ไม่ใช่ admin → `ErrForbidden`
 - admin แก้ชื่อ → log `first_name`/`last_name` ระบุ `changed_by` = admin
 - ปิด skill → ไม่อยู่ใน `/skills` แต่พนักงานที่มีอยู่แล้วยังเห็น · ชื่อ skill ซ้ำ (ไม่สนตัวพิมพ์) → 409
