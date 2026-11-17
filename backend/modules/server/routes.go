@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"employee-portal/modules/auth"
+	"employee-portal/modules/history"
 	"employee-portal/modules/profile"
 	"employee-portal/modules/skill"
 	"employee-portal/pkg/middleware"
@@ -41,6 +42,10 @@ func (s *Server) routes() {
 	p.PUT("/contact/:field", profileH.UpdateContact)
 	p.PUT("/skills", profileH.SetSkills)
 	// No route changes the name: F2 is enforced by the server, not only the UI.
+
+	// ── history (read-only; writes happen inside the profile transactions)
+	historyH := history.NewHandler(history.NewUsecase(history.NewRepository(s.pool), s.cfg.HistoryDays))
+	p.GET("/history", historyH.ListOwn)
 
 	// ── skill catalog (picker)
 	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.pool)))
