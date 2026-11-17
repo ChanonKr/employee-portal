@@ -2,13 +2,11 @@ package employee
 
 import (
 	"context"
-	"time"
 
 	"gorm.io/gorm"
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/model"
 )
 
 type repository struct {
@@ -21,7 +19,7 @@ func NewRepository(db *gorm.DB) Repository {
 
 // withUser joins each employee to their account (code, role, active).
 func withUser(db *gorm.DB) *gorm.DB {
-	return db.Model(&model.Employee{}).Joins("JOIN users ON users.id = employees.user_id")
+	return db.Table("employees").Joins("JOIN users ON users.id = employees.user_id")
 }
 
 // matching filters by code or full name. The pattern is escaped in entity.LikePattern.
@@ -44,15 +42,7 @@ func (r *repository) List(ctx context.Context, q entity.EmployeeQuery) ([]entity
 		return nil, 0, database.MapError(err)
 	}
 
-	var rows []struct {
-		ID           int64
-		EmployeeCode string
-		FirstName    string
-		LastName     string
-		PhotoPath    *string
-		Role         string
-		IsActive     bool
-	}
+	var rows []summaryRow
 	err := db.Scopes(withUser, filter).
 		Select("employees.id, users.employee_code, employees.first_name, employees.last_name, employees.photo_path, users.role, users.is_active").
 		Order("employees.first_name").Order("employees.last_name").Order("employees.id").
@@ -74,12 +64,7 @@ func (r *repository) List(ctx context.Context, q entity.EmployeeQuery) ([]entity
 
 func (r *repository) Get(ctx context.Context, id int64) (entity.EmployeeDetail, error) {
 	db := r.db.WithContext(ctx)
-	var row struct {
-		model.Employee
-		EmployeeCode string
-		Role         string
-		IsActive     bool
-	}
+	var row detailRow
 	err := db.Scopes(withUser).
 		Select("employees.*, users.employee_code, users.role, users.is_active").
 		Where("employees.id = ?", id).
@@ -87,19 +72,32 @@ func (r *repository) Get(ctx context.Context, id int64) (entity.EmployeeDetail, 
 	if err != nil {
 		return entity.EmployeeDetail{}, database.MapError(err)
 	}
-	var skills []model.Skill
-	if err := db.Scopes(model.SkillsOf(id)).Find(&skills).Error; err != nil {
+	var skills []skillRow
+	err = db.Table("skills").Select("skills.id, skills.name, skills.is_active").
+		Joins("JOIN employee_skills es ON es.skill_id = skills.id").
+		Where("es.employee_id = ?", id).
+		Order("skills.sort_order").Order("skills.name").
+		Find(&skills).Error
+	if err != nil {
 		return entity.EmployeeDetail{}, database.MapError(err)
 	}
-	return entity.EmployeeDetail{
+	d := entity.EmployeeDetail{
 		Profile: entity.Profile{
-			Employee:     row.Employee.ToEntity(),
+			Employee: entity.Employee{
+				ID: row.ID, UserID: row.UserID, FirstName: row.FirstName, LastName: row.LastName,
+				PhotoPath: row.PhotoPath, MobilePhone: row.MobilePhone, ContactEmail: row.ContactEmail,
+				Address: row.Address, Version: row.Version,
+			},
 			EmployeeCode: row.EmployeeCode,
-			Skills:       model.SkillsToEntity(skills),
+			Skills:       make([]entity.Skill, len(skills)),
 		},
 		Role:     entity.Role(row.Role),
 		IsActive: row.IsActive,
-	}, nil
+	}
+	for i, s := range skills {
+		d.Skills[i] = entity.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
+	}
+	return d, nil
 }
 
 func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (entity.DashboardStats, error) {
@@ -107,7 +105,7 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 
 	// "Complete" matches the profile checklist: photo, all contact fields, at least one skill.
 	var counts struct{ Total, Complete int64 }
-	err := db.Model(&model.Employee{}).Select(`count(*) AS total,
+	err := db.Table("employees").Select(`count(*) AS total,
 		count(*) FILTER (
 		  WHERE photo_path IS NOT NULL AND mobile_phone IS NOT NULL
 		    AND contact_email IS NOT NULL AND address IS NOT NULL
@@ -117,12 +115,8 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		return entity.DashboardStats{}, database.MapError(err)
 	}
 
-	var top []struct {
-		ID     int64
-		Name   string
-		UsedBy int64
-	}
-	err = db.Model(&model.EmployeeSkill{}).
+	var top []topSkillRow
+	err = db.Table("employee_skills").
 		Select("skills.id, skills.name, count(*) AS used_by").
 		Joins("JOIN skills ON skills.id = employee_skills.skill_id").
 		Group("skills.id").
@@ -133,17 +127,8 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		return entity.DashboardStats{}, database.MapError(err)
 	}
 
-	var recent []struct {
-		ID            int64
-		EmployeeID    int64
-		EmployeeCode  string
-		FirstName     string
-		LastName      string
-		Field         string
-		ChangedAt     time.Time
-		ChangedByRole string
-	}
-	err = db.Model(&model.ProfileChangeLog{}).
+	var recent []recentChangeRow
+	err = db.Table("profile_change_logs").
 		Select("profile_change_logs.id, profile_change_logs.employee_id, u.employee_code, e.first_name, e.last_name, " +
 			"profile_change_logs.field, profile_change_logs.changed_at, cb.role AS changed_by_role").
 		Joins("JOIN employees e ON e.id = profile_change_logs.employee_id").

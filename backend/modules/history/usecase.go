@@ -7,16 +7,6 @@ import (
 	"employee-portal/modules/entity"
 )
 
-// Repository is implemented in repository.go.
-type Repository interface {
-	// HistoryDays returns the raw app_settings value, or entity.ErrNotFound.
-	HistoryDays(ctx context.Context) (string, error)
-	// List returns at most limit rows, newest first.
-	List(ctx context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error)
-	HasOlder(ctx context.Context, employeeID int64, days int) (bool, error)
-	EmployeeExists(ctx context.Context, employeeID int64) (bool, error)
-}
-
 type ListInput struct {
 	Actor    entity.Actor
 	Field    string // "" = all fields
@@ -31,13 +21,6 @@ type Result struct {
 	Items    []entity.ChangeLog
 	Page     entity.PageRequest
 	HasNext  bool
-}
-
-type Usecase interface {
-	// ListOwn returns the signed-in employee's changes within the history window.
-	ListOwn(ctx context.Context, in ListInput) (Result, error)
-	// ListForEmployee is the admin view: any employee, all history, no time window.
-	ListForEmployee(ctx context.Context, employeeID int64, in ListInput) (Result, error)
 }
 
 type usecase struct {

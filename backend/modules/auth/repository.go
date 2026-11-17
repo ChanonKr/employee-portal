@@ -7,7 +7,6 @@ import (
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/model"
 )
 
 type repository struct {
@@ -19,14 +18,15 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // userRow is a user with the id of their profile (none for accounts without one).
+// The model is a named, embedded field: GORM skips anonymous fields of unexported types.
 type userRow struct {
-	model.User
+	User       userModel `gorm:"embedded"`
 	EmployeeID *int64
 }
 
 func (r *repository) getUser(ctx context.Context, where string, arg any) (entity.User, error) {
 	var row userRow
-	err := r.db.WithContext(ctx).Model(&model.User{}).
+	err := r.db.WithContext(ctx).Model(&userModel{}).
 		Select("users.*, employees.id AS employee_id").
 		Joins("LEFT JOIN employees ON employees.user_id = users.id").
 		Where(where, arg).
@@ -34,10 +34,11 @@ func (r *repository) getUser(ctx context.Context, where string, arg any) (entity
 	if err != nil {
 		return entity.User{}, database.MapError(err)
 	}
+	u := row.User
 	return entity.User{
-		ID: row.ID, EmployeeCode: row.EmployeeCode, PasswordHash: row.PasswordHash,
-		Role: entity.Role(row.Role), IsActive: row.IsActive,
-		MustChangePassword: row.MustChangePassword, EmployeeID: row.EmployeeID,
+		ID: u.ID, EmployeeCode: u.EmployeeCode, PasswordHash: u.PasswordHash,
+		Role: entity.Role(u.Role), IsActive: u.IsActive,
+		MustChangePassword: u.MustChangePassword, EmployeeID: row.EmployeeID,
 	}, nil
 }
 
@@ -51,8 +52,8 @@ func (r *repository) GetUserByID(ctx context.Context, id int64) (entity.User, er
 
 func (r *repository) CreateAccount(ctx context.Context, a entity.NewAccount, passwordHash string) (int64, int64, error) {
 	// New accounts must change the temporary password on first sign-in.
-	u := model.User{EmployeeCode: a.EmployeeCode, PasswordHash: passwordHash, Role: string(a.Role), MustChangePassword: true}
-	e := model.Employee{FirstName: a.FirstName, LastName: a.LastName}
+	u := userModel{EmployeeCode: a.EmployeeCode, PasswordHash: passwordHash, Role: string(a.Role), MustChangePassword: true}
+	e := employeeModel{FirstName: a.FirstName, LastName: a.LastName}
 	err := database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		if err := tx.Create(&u).Error; err != nil {
 			return database.MapError(err)
@@ -64,7 +65,7 @@ func (r *repository) CreateAccount(ctx context.Context, a entity.NewAccount, pas
 }
 
 func (r *repository) SetPassword(ctx context.Context, userID int64, passwordHash string, mustChange bool) error {
-	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).
+	res := r.db.WithContext(ctx).Model(&userModel{}).Where("id = ?", userID).
 		Updates(map[string]any{"password_hash": passwordHash, "must_change_password": mustChange})
 	if res.Error != nil {
 		return database.MapError(res.Error)
@@ -76,7 +77,7 @@ func (r *repository) SetPassword(ctx context.Context, userID int64, passwordHash
 }
 
 func (r *repository) UserIDByEmployee(ctx context.Context, employeeID int64) (int64, error) {
-	var e model.Employee
+	var e employeeModel
 	err := r.db.WithContext(ctx).Select("user_id").Take(&e, employeeID).Error
 	return e.UserID, database.MapError(err)
 }

@@ -85,15 +85,15 @@ employee-portal/
 │   ├── modules/
 │   │   ├── server/
 │   │   │   ├── server.go               # gin.Engine, global middleware, Run/Shutdown
-│   │   │   └── routes.go               # composition root: repo → usecase → handler → route group
+│   │   │   └── routes.go               # composition root: สร้าง group + middleware, ประกอบ repo → usecase → handler แล้วเรียก RegisterRoutes ของแต่ละ module
 │   │   ├── entity/                     # domain ล้วน: ไม่มี tag, ไม่ import gin/pgx
 │   │   │   ├── employee.go             # Employee, Profile, ChangeContact()
 │   │   │   ├── contact.go              # ContactField: Parse / Normalize / Validate
 │   │   │   ├── changelog.go · skill.go · user.go · actor.go
 │   │   │   ├── errors.go               # ErrNotFound, ErrConflict, ErrForbidden, ErrUnauthorized, ValidationError
 │   │   │   └── *_test.go
-│   │   ├── auth/                       # handler.go · usecase.go · usecase_test.go · repository.go
-│   │   ├── profile/                    # handler.go · usecase.go · usecase_test.go · repository.go (รวม PUT /profile/skills)
+│   │   ├── auth/                       # router.go · handler.go · interface.go · usecase.go · repository.go · model.go · usecase_test.go
+│   │   ├── profile/                    # ไฟล์ชุดเดียวกัน (รวม PUT /profile/skills)
 │   │   ├── skill/                      # GET /skills (catalog สำหรับ picker)
 │   │   ├── history/                    # GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
 │   │   ├── file/                       # GET /files/photos/:name (handler อย่างเดียว — stream ไฟล์)
@@ -105,7 +105,7 @@ employee-portal/
 │   │   │   ├── tx.go                   # WithTx(ctx, db, fn(*gorm.DB))
 │   │   │   ├── errors.go               # gorm / pg error → entity error
 │   │   │   ├── migrations/             # golang-migrate: init, grants, seed_demo
-│   │   │   └── model/                  # GORM structs (ตรงกับตาราง) + ToEntity() + scopes
+│   │   ├── router/                     # Groups: Root, API, Admin + middleware SignedIn/Ready ที่ server ส่งให้ทุก module
 │   │   ├── middleware/                 # requestid, logger, recover, auth, rbac, ratelimit, headers, timeout
 │   │   ├── httputil/                   # error envelope (WriteError), ETag / If-Match
 │   │   ├── security/                   # jwt.go, password.go (bcrypt)
@@ -444,7 +444,21 @@ repository.go ─────┘ (implements interface ที่ usecase.go ป�
 ```
 - `entity` ไม่ import อะไรในโปรเจกต์เลย
 - handler / usecase / repository อยู่ใน package เดียวกัน (ชื่อสั้น: `profile.NewUsecase`, ไม่ต้อง alias) คุม layer ด้วยการให้แต่ละชั้นรู้จักแค่ interface ของชั้นถัดไป
-- `modules/server/routes.go` เป็นที่เดียวที่ประกอบทุกชั้นเข้าด้วยกัน
+- `modules/server/routes.go` เป็นที่เดียวที่ประกอบทุกชั้นเข้าด้วยกัน แล้วเรียก `RegisterRoutes(router.Groups)` ของแต่ละ module
+
+**ไฟล์ในแต่ละ module (feature จบในโฟลเดอร์เดียว)**
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `router.go` | ผูก route ของ module เข้ากับ group ที่ server ส่งมา (`API`, `Admin`, `SignedIn`, `Ready`) |
+| `handler.go` | HTTP ↔ use case: bind JSON, If-Match/ETag, DTO |
+| `interface.go` | port ของ module: `Usecase` (handler เรียก), `Repository` ฯลฯ (use case ต้องการ) |
+| `usecase.go` | ลำดับขั้น + transaction |
+| `repository.go` | query ด้วย GORM, แปลง model ↔ entity |
+| `model.go` | GORM struct **เฉพาะตาราง/คอลัมน์ที่ module นี้ใช้** (เช่น `auth` มี `employeeModel` แค่ 4 field สำหรับสร้างโปรไฟล์ว่าง) |
+
+- module ไม่ import กันเอง: ตารางที่ใช้ร่วมกัน (`employees`, `skills`) แต่ละ module ประกาศ struct ของตัวเอง แลกกับ struct ซ้ำกันเล็กน้อย
+- struct เป็น unexported (`employeeModel`) → ถ้าจะฝังใน struct อื่นต้องเป็น field มีชื่อ + `gorm:"embedded"` (GORM ข้าม anonymous field ที่เป็น unexported type)
+- `entity` ยังอยู่รวมที่ `modules/entity` เพราะกฎธุรกิจใช้ข้าม module (เช่น `Employee` ใช้ทั้ง profile, employee, history)
 
 ### 7.2 Interfaces หลัก
 แต่ละ module ประกาศ interface ที่ use case **ต้องการ** ไว้ใน `usecase.go` ของตัวเอง (Dependency Inversion) — ดูตัวอย่าง `profile.Repository` / `profile.TxRepository` ใน §5.4

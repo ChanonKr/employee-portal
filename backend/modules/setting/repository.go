@@ -9,7 +9,6 @@ import (
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/model"
 )
 
 type repository struct {
@@ -27,7 +26,7 @@ func (r *repository) Get(ctx context.Context, key string) (string, entity.Histor
 		UpdatedByID   *int64
 		UpdatedByCode *string
 	}
-	err := r.db.WithContext(ctx).Model(&model.AppSetting{}).
+	err := r.db.WithContext(ctx).Model(&settingModel{}).
 		Select("app_settings.value, app_settings.updated_at, users.id AS updated_by_id, users.employee_code AS updated_by_code").
 		Joins("LEFT JOIN users ON users.id = app_settings.updated_by").
 		Where("app_settings.key = ?", key).
@@ -45,7 +44,7 @@ func (r *repository) Get(ctx context.Context, key string) (string, entity.Histor
 
 func (r *repository) Set(ctx context.Context, key, value string, by entity.Actor) error {
 	uid := by.UserID
-	s := model.AppSetting{Key: key, Value: value, UpdatedBy: &uid}
+	s := settingModel{Key: key, Value: value, UpdatedBy: &uid}
 	// INSERT ... ON CONFLICT (key) DO UPDATE
 	return database.MapError(r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},

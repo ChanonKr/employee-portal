@@ -111,9 +111,10 @@ backend/
 ├── modules/
 │   ├── entity/               domain types and business rules (no framework imports)
 │   ├── auth/ profile/ skill/ history/ file/ setting/ employee/
-│   │     handler.go → usecase.go → repository.go
-│   └── server/               router; wires repository → use case → handler
-└── pkg/                      database (migrations, GORM models), middleware, security, storage, imaging
+│   │     router.go → handler.go → usecase.go → repository.go
+│   │     interface.go (ports) · model.go (GORM structs for this module's tables)
+│   └── server/               shared route groups + middleware; wires each module
+└── pkg/                      database (GORM, migrations), router, middleware, security, storage, imaging
 ```
 
 ## License

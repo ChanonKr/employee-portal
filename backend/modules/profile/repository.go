@@ -10,7 +10,6 @@ import (
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/model"
 )
 
 // contactColumn maps a domain field to its column. It is the only source of column
@@ -32,10 +31,10 @@ func NewRepository(db *gorm.DB) Repository {
 func (r *repository) GetProfile(ctx context.Context, employeeID int64) (entity.Profile, error) {
 	db := r.db.WithContext(ctx)
 	var row struct {
-		model.Employee
+		Employee     employeeModel `gorm:"embedded"` // named: GORM skips anonymous unexported types
 		EmployeeCode string
 	}
-	err := db.Model(&model.Employee{}).
+	err := db.Model(&employeeModel{}).
 		Select("employees.*, users.employee_code").
 		Joins("JOIN users ON users.id = employees.user_id").
 		Where("employees.id = ?", employeeID).
@@ -43,14 +42,14 @@ func (r *repository) GetProfile(ctx context.Context, employeeID int64) (entity.P
 	if err != nil {
 		return entity.Profile{}, database.MapError(err)
 	}
-	var skills []model.Skill
-	if err := db.Scopes(model.SkillsOf(employeeID)).Find(&skills).Error; err != nil {
+	var skills []skillModel
+	if err := db.Scopes(skillsOf(employeeID)).Find(&skills).Error; err != nil {
 		return entity.Profile{}, database.MapError(err)
 	}
 	return entity.Profile{
-		Employee:     row.Employee.ToEntity(),
+		Employee:     row.Employee.toEntity(),
 		EmployeeCode: row.EmployeeCode,
-		Skills:       model.SkillsToEntity(skills),
+		Skills:       toSkills(skills),
 	}, nil
 }
 
@@ -66,13 +65,13 @@ type txRepository struct {
 }
 
 func (t *txRepository) GetForUpdate(ctx context.Context, employeeID int64) (entity.Employee, error) {
-	var e model.Employee
+	var e employeeModel
 	// SELECT ... FOR UPDATE: concurrent edits of one profile are serialized.
 	err := t.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Take(&e, employeeID).Error
 	if err != nil {
 		return entity.Employee{}, database.MapError(err)
 	}
-	return e.ToEntity(), nil
+	return e.toEntity(), nil
 }
 
 // update writes fields only if the version is still e.Version and bumps it.
@@ -81,7 +80,7 @@ func (t *txRepository) GetForUpdate(ctx context.Context, employeeID int64) (enti
 func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map[string]any) (int32, error) {
 	fields["version"] = gorm.Expr("version + 1")
 	fields["updated_at"] = gorm.Expr("now()")
-	res := t.db.WithContext(ctx).Model(&model.Employee{}).
+	res := t.db.WithContext(ctx).Model(&employeeModel{}).
 		Where("id = ? AND version = ?", e.ID, e.Version).
 		Updates(fields)
 	if res.Error != nil {
@@ -122,7 +121,7 @@ func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c ent
 	if err != nil {
 		return err
 	}
-	return database.MapError(t.db.WithContext(ctx).Create(&model.ProfileChangeLog{
+	return database.MapError(t.db.WithContext(ctx).Create(&changeLogModel{
 		EmployeeID: employeeID,
 		Field:      string(c.Field),
 		OldValue:   oldJSON,
@@ -132,11 +131,11 @@ func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c ent
 }
 
 func (t *txRepository) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]entity.Skill, error) {
-	var rows []model.Skill
-	if err := t.db.WithContext(ctx).Scopes(model.SkillsOf(employeeID)).Find(&rows).Error; err != nil {
+	var rows []skillModel
+	if err := t.db.WithContext(ctx).Scopes(skillsOf(employeeID)).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
 	}
-	return model.SkillsToEntity(rows), nil
+	return toSkills(rows), nil
 }
 
 func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]entity.Skill, error) {
@@ -144,24 +143,24 @@ func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]entit
 		return []entity.Skill{}, nil
 	}
 	// Includes inactive skills so the use case can tell "unknown" from "inactive".
-	var rows []model.Skill
-	if err := t.db.WithContext(ctx).Where("id IN ?", ids).Scopes(model.SkillOrder).Find(&rows).Error; err != nil {
+	var rows []skillModel
+	if err := t.db.WithContext(ctx).Where("id IN ?", ids).Scopes(skillOrder).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
 	}
-	return model.SkillsToEntity(rows), nil
+	return toSkills(rows), nil
 }
 
 func (t *txRepository) ReplaceSkills(ctx context.Context, employeeID int64, skillIDs []int64) error {
 	db := t.db.WithContext(ctx)
-	if err := db.Where("employee_id = ?", employeeID).Delete(&model.EmployeeSkill{}).Error; err != nil {
+	if err := db.Where("employee_id = ?", employeeID).Delete(&employeeSkillModel{}).Error; err != nil {
 		return database.MapError(err)
 	}
 	if len(skillIDs) == 0 {
 		return nil
 	}
-	rows := make([]model.EmployeeSkill, len(skillIDs))
+	rows := make([]employeeSkillModel, len(skillIDs))
 	for i, id := range skillIDs {
-		rows[i] = model.EmployeeSkill{EmployeeID: employeeID, SkillID: id}
+		rows[i] = employeeSkillModel{EmployeeID: employeeID, SkillID: id}
 	}
 	return database.MapError(db.Create(&rows).Error)
 }

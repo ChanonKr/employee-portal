@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"gorm.io/gorm"
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/model"
 )
 
 const settingHistoryDays = "history_days"
@@ -24,14 +22,14 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 func (r *repository) HistoryDays(ctx context.Context) (string, error) {
-	var s model.AppSetting
-	err := r.db.WithContext(ctx).Select("value").Where("key = ?", settingHistoryDays).Take(&s).Error
-	return s.Value, database.MapError(err)
+	var row struct{ Value string }
+	err := r.db.WithContext(ctx).Table(settingTable).Select("value").Where("key = ?", settingHistoryDays).Take(&row).Error
+	return row.Value, database.MapError(err)
 }
 
 // List reads the log newest first. Days 0 = no time window (admin); Field nil = all fields.
 func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error) {
-	db := r.db.WithContext(ctx).Model(&model.ProfileChangeLog{}).
+	db := r.db.WithContext(ctx).Table(changeLogTable).
 		Select("profile_change_logs.id, profile_change_logs.field, profile_change_logs.old_value, "+
 			"profile_change_logs.new_value, profile_change_logs.changed_at, profile_change_logs.changed_by, "+
 			"users.role AS changed_by_role").
@@ -44,15 +42,7 @@ func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int)
 		db = db.Where("profile_change_logs.field = ?", string(*q.Field))
 	}
 
-	var rows []struct {
-		ID            int64
-		Field         string
-		OldValue      []byte
-		NewValue      []byte
-		ChangedAt     time.Time
-		ChangedBy     int64
-		ChangedByRole string
-	}
+	var rows []changeLogRow
 	err := db.Order("profile_change_logs.changed_at DESC").Order("profile_change_logs.id DESC").
 		Limit(limit).Offset(q.Offset()).
 		Find(&rows).Error
@@ -83,13 +73,13 @@ func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int)
 // HasOlder drives the empty state: "No changes yet" vs "No changes in the last N days".
 func (r *repository) HasOlder(ctx context.Context, employeeID int64, days int) (bool, error) {
 	db := r.db.WithContext(ctx)
-	return exists(db, db.Model(&model.ProfileChangeLog{}).
+	return exists(db, db.Table(changeLogTable).
 		Where("employee_id = ? AND changed_at < now() - make_interval(days => ?)", employeeID, days))
 }
 
 func (r *repository) EmployeeExists(ctx context.Context, employeeID int64) (bool, error) {
 	db := r.db.WithContext(ctx)
-	return exists(db, db.Model(&model.Employee{}).Where("id = ?", employeeID))
+	return exists(db, db.Table(employeeTable).Where("id = ?", employeeID))
 }
 
 // exists runs SELECT EXISTS (<sub>), which stops at the first matching row.
