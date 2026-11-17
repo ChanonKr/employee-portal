@@ -1,5 +1,5 @@
 import { KeyRound, LogOut, ShieldCheck, UserRound } from 'lucide-react'
-import { NavLink, Outlet, useNavigate } from 'react-router'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useLogout, useMe } from '@/features/auth/api'
 import { cn } from '@/lib/cn'
 import { Button } from './ui/button'
@@ -14,6 +14,8 @@ export function AppShell() {
   const { data: me } = useMe()
   const logout = useLogout()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const inProfile = pathname === '/profile' || pathname === '/history' // history is part of the profile
 
   return (
     <div className="min-h-dvh">
@@ -27,7 +29,7 @@ export function AppShell() {
           </NavLink>
           {/* Few items on purpose: History lives under the profile ("View all"). */}
           <nav className="flex items-center gap-1" aria-label="Main">
-            <NavLink to="/profile" className={navLink}>
+            <NavLink to="/profile" className={({ isActive }) => navLink({ isActive: isActive || inProfile })}>
               Profile
             </NavLink>
             {me?.role === 'admin' && (

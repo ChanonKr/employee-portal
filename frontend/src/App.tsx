@@ -4,6 +4,7 @@ import { SessionWatcher } from '@/components/SessionWatcher'
 import { ChangePasswordPage } from '@/features/auth/ChangePasswordPage'
 import { RedirectIfSignedIn, RequireAuth } from '@/features/auth/guards'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { HistoryPage } from '@/features/history/HistoryPage'
 import { ProfilePage } from '@/features/profile/ProfilePage'
 
 export function App() {
@@ -35,6 +36,7 @@ export function App() {
           }
         >
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/history" element={<HistoryPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/profile" replace />} />
       </Routes>
