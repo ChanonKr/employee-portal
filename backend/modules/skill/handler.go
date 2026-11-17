@@ -2,7 +2,6 @@ package skill
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -91,9 +90,8 @@ func (h *Handler) Create(c *gin.Context) {
 
 // Update: PATCH /admin/skills/:id {name?, isActive?} → 204.
 func (h *Handler) Update(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		httputil.WriteError(c, entity.ErrNotFound)
+	id, ok := httputil.PathID(c, "id")
+	if !ok {
 		return
 	}
 	var req updateRequest
@@ -101,7 +99,7 @@ func (h *Handler) Update(c *gin.Context) {
 		httputil.WriteError(c, entity.NewValidationError("body", "must be JSON with name and/or isActive"))
 		return
 	}
-	err = h.uc.Update(c.Request.Context(), middleware.ActorFrom(c), UpdateInput{ID: id, Name: req.Name, IsActive: req.IsActive})
+	err := h.uc.Update(c.Request.Context(), middleware.ActorFrom(c), UpdateInput{ID: id, Name: req.Name, IsActive: req.IsActive})
 	if err != nil {
 		httputil.WriteError(c, err)
 		return
