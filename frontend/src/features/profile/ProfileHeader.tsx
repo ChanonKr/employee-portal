@@ -120,10 +120,10 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
         <div className="flex flex-col items-center gap-2">
           <p className="text-sm text-muted">Preview — save to use this photo.</p>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setPending(null)} disabled={upload.isPending}>
+            <Button variant="secondary" size="sm" onClick={() => setPending(null)} disabled={upload.isPending}>
               Cancel
             </Button>
-            <Button onClick={save} loading={upload.isPending}>
+            <Button size="sm" onClick={save} loading={upload.isPending}>
               Save photo
             </Button>
           </div>
