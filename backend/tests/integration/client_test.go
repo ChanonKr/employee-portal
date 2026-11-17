@@ -32,7 +32,7 @@ func newTestServer(t *testing.T) string {
 		JWTSecret: randomSecret(t), JWTTTL: 3600e9, HistoryDays: 7,
 		CORSOrigins: []string{"http://localhost:5173"},
 		UploadDir:   t.TempDir(), UploadMaxBytes: 5 << 20,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)), appPool)
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), appDB)
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

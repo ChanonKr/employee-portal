@@ -3,19 +3,18 @@ package profile
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/sqlc"
+	"employee-portal/pkg/database/model"
 )
 
 // contactColumn maps a domain field to its column. It is the only source of column
-// names passed to UpdateContactField, so user input never reaches SQL.
+// names used in updates, so user input never reaches SQL.
 var contactColumn = map[entity.ContactField]string{
 	entity.ContactMobile:  "mobile_phone",
 	entity.ContactEmail:   "contact_email",
@@ -23,50 +22,75 @@ var contactColumn = map[entity.ContactField]string{
 }
 
 type repository struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
+	db *gorm.DB
 }
 
-func NewRepository(pool *pgxpool.Pool) Repository {
-	return &repository{pool: pool, q: sqlc.New(pool)}
+func NewRepository(db *gorm.DB) Repository {
+	return &repository{db: db}
 }
 
 func (r *repository) GetProfile(ctx context.Context, employeeID int64) (entity.Profile, error) {
-	row, err := r.q.GetProfile(ctx, employeeID)
+	db := r.db.WithContext(ctx)
+	var row struct {
+		model.Employee
+		EmployeeCode string
+	}
+	err := db.Model(&model.Employee{}).
+		Select("employees.*, users.employee_code").
+		Joins("JOIN users ON users.id = employees.user_id").
+		Where("employees.id = ?", employeeID).
+		Take(&row).Error
 	if err != nil {
 		return entity.Profile{}, database.MapError(err)
 	}
-	skills, err := r.q.ListEmployeeSkills(ctx, employeeID)
-	if err != nil {
+	var skills []model.Skill
+	if err := db.Scopes(model.SkillsOf(employeeID)).Find(&skills).Error; err != nil {
 		return entity.Profile{}, database.MapError(err)
 	}
-	p := entity.Profile{
-		Employee:     toEmployee(row.Employee),
+	return entity.Profile{
+		Employee:     row.Employee.ToEntity(),
 		EmployeeCode: row.EmployeeCode,
-		Skills:       make([]entity.Skill, len(skills)),
-	}
-	for i, s := range skills {
-		p.Skills[i] = entity.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
-	}
-	return p, nil
+		Skills:       model.SkillsToEntity(skills),
+	}, nil
 }
 
 func (r *repository) WithTx(ctx context.Context, fn func(TxRepository) error) error {
-	return database.WithTx(ctx, r.pool, func(q *sqlc.Queries) error {
-		return fn(&txRepository{q: q})
+	return database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		return fn(&txRepository{db: tx})
 	})
 }
 
+// txRepository runs on the transaction's *gorm.DB (already bound to the context).
 type txRepository struct {
-	q *sqlc.Queries
+	db *gorm.DB
 }
 
 func (t *txRepository) GetForUpdate(ctx context.Context, employeeID int64) (entity.Employee, error) {
-	row, err := t.q.GetProfileForUpdate(ctx, employeeID)
+	var e model.Employee
+	// SELECT ... FOR UPDATE: concurrent edits of one profile are serialized.
+	err := t.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Take(&e, employeeID).Error
 	if err != nil {
 		return entity.Employee{}, database.MapError(err)
 	}
-	return toEmployee(row), nil
+	return e.ToEntity(), nil
+}
+
+// update writes fields only if the version is still e.Version and bumps it.
+// No row matched = someone else changed it first (cannot happen under FOR UPDATE,
+// but report a conflict rather than "not found" if it ever does).
+func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map[string]any) (int32, error) {
+	fields["version"] = gorm.Expr("version + 1")
+	fields["updated_at"] = gorm.Expr("now()")
+	res := t.db.WithContext(ctx).Model(&model.Employee{}).
+		Where("id = ? AND version = ?", e.ID, e.Version).
+		Updates(fields)
+	if res.Error != nil {
+		return 0, database.MapError(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return 0, entity.ErrConflict
+	}
+	return e.Version + 1, nil
 }
 
 func (t *txRepository) SaveContact(ctx context.Context, e entity.Employee, f entity.ContactField) (int32, error) {
@@ -74,18 +98,19 @@ func (t *txRepository) SaveContact(ctx context.Context, e entity.Employee, f ent
 	if !ok {
 		return 0, fmt.Errorf("no column for contact field %q", f)
 	}
-	v, err := t.q.UpdateContactField(ctx, sqlc.UpdateContactFieldParams{
-		ID: e.ID, Field: col, Value: e.Contact(f), Version: e.Version,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Version changed between lock and update. Cannot happen under FOR UPDATE,
-		// but report it as a conflict rather than "not found" if it ever does.
-		return 0, entity.ErrConflict
-	}
-	if err != nil {
-		return 0, database.MapError(err)
-	}
-	return v, nil
+	return t.update(ctx, e, map[string]any{col: e.Contact(f)})
+}
+
+func (t *txRepository) SavePhoto(ctx context.Context, e entity.Employee) (int32, error) {
+	return t.update(ctx, e, map[string]any{"photo_path": e.PhotoPath})
+}
+
+func (t *txRepository) SaveName(ctx context.Context, e entity.Employee) (int32, error) {
+	return t.update(ctx, e, map[string]any{"first_name": e.FirstName, "last_name": e.LastName})
+}
+
+func (t *txRepository) BumpVersion(ctx context.Context, e entity.Employee) (int32, error) {
+	return t.update(ctx, e, map[string]any{})
 }
 
 func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c entity.Change, by entity.Actor) error {
@@ -97,87 +122,48 @@ func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c ent
 	if err != nil {
 		return err
 	}
-	return database.MapError(t.q.InsertChangeLog(ctx, sqlc.InsertChangeLogParams{
+	return database.MapError(t.db.WithContext(ctx).Create(&model.ProfileChangeLog{
 		EmployeeID: employeeID,
 		Field:      string(c.Field),
 		OldValue:   oldJSON,
 		NewValue:   newJSON,
 		ChangedBy:  by.UserID,
-	}))
+	}).Error)
 }
 
 func (t *txRepository) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]entity.Skill, error) {
-	rows, err := t.q.ListEmployeeSkills(ctx, employeeID)
-	if err != nil {
+	var rows []model.Skill
+	if err := t.db.WithContext(ctx).Scopes(model.SkillsOf(employeeID)).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
 	}
-	skills := make([]entity.Skill, len(rows))
-	for i, r := range rows {
-		skills[i] = entity.Skill{ID: r.ID, Name: r.Name, IsActive: r.IsActive}
-	}
-	return skills, nil
+	return model.SkillsToEntity(rows), nil
 }
 
 func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]entity.Skill, error) {
 	if len(ids) == 0 {
 		return []entity.Skill{}, nil
 	}
-	rows, err := t.q.GetSkillsByIDs(ctx, ids)
-	if err != nil {
+	// Includes inactive skills so the use case can tell "unknown" from "inactive".
+	var rows []model.Skill
+	if err := t.db.WithContext(ctx).Where("id IN ?", ids).Scopes(model.SkillOrder).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
 	}
-	skills := make([]entity.Skill, len(rows))
-	for i, r := range rows {
-		skills[i] = entity.Skill{ID: r.ID, Name: r.Name, IsActive: r.IsActive}
-	}
-	return skills, nil
+	return model.SkillsToEntity(rows), nil
 }
 
 func (t *txRepository) ReplaceSkills(ctx context.Context, employeeID int64, skillIDs []int64) error {
-	if err := t.q.DeleteEmployeeSkills(ctx, employeeID); err != nil {
+	db := t.db.WithContext(ctx)
+	if err := db.Where("employee_id = ?", employeeID).Delete(&model.EmployeeSkill{}).Error; err != nil {
 		return database.MapError(err)
 	}
 	if len(skillIDs) == 0 {
 		return nil
 	}
-	return database.MapError(t.q.InsertEmployeeSkills(ctx, sqlc.InsertEmployeeSkillsParams{
-		EmployeeID: employeeID, SkillIds: skillIDs,
-	}))
-}
-
-func (t *txRepository) SavePhoto(ctx context.Context, e entity.Employee) (int32, error) {
-	v, err := t.q.UpdatePhoto(ctx, sqlc.UpdatePhotoParams{ID: e.ID, PhotoPath: e.PhotoPath, Version: e.Version})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, entity.ErrConflict
+	rows := make([]model.EmployeeSkill, len(skillIDs))
+	for i, id := range skillIDs {
+		rows[i] = model.EmployeeSkill{EmployeeID: employeeID, SkillID: id}
 	}
-	if err != nil {
-		return 0, database.MapError(err)
-	}
-	return v, nil
-}
-
-func (t *txRepository) SaveName(ctx context.Context, e entity.Employee) (int32, error) {
-	v, err := t.q.UpdateName(ctx, sqlc.UpdateNameParams{
-		ID: e.ID, FirstName: e.FirstName, LastName: e.LastName, Version: e.Version,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, entity.ErrConflict
-	}
-	if err != nil {
-		return 0, database.MapError(err)
-	}
-	return v, nil
-}
-
-func (t *txRepository) BumpVersion(ctx context.Context, e entity.Employee) (int32, error) {
-	v, err := t.q.BumpVersion(ctx, sqlc.BumpVersionParams{ID: e.ID, Version: e.Version})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, entity.ErrConflict
-	}
-	if err != nil {
-		return 0, database.MapError(err)
-	}
-	return v, nil
+	return database.MapError(db.Create(&rows).Error)
 }
 
 // jsonOrNull returns nil (SQL NULL) for a nil value, otherwise its JSON encoding.
@@ -190,12 +176,4 @@ func jsonOrNull(v any) ([]byte, error) {
 		return nil, fmt.Errorf("encode change value: %w", err)
 	}
 	return b, nil
-}
-
-func toEmployee(e sqlc.Employee) entity.Employee {
-	return entity.Employee{
-		ID: e.ID, UserID: e.UserID, FirstName: e.FirstName, LastName: e.LastName,
-		PhotoPath: e.PhotoPath, MobilePhone: e.MobilePhone, ContactEmail: e.ContactEmail,
-		Address: e.Address, Version: e.Version,
-	}
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"employee-portal/configs"
 	"employee-portal/pkg/httputil"
@@ -27,13 +27,13 @@ const (
 type Server struct {
 	cfg    configs.Config
 	log    *slog.Logger
-	pool   *pgxpool.Pool
+	db     *gorm.DB
 	tokens *security.TokenManager
 	files  *storage.Local
 	engine *gin.Engine
 }
 
-func New(cfg configs.Config, log *slog.Logger, pool *pgxpool.Pool) (*Server, error) {
+func New(cfg configs.Config, log *slog.Logger, db *gorm.DB) (*Server, error) {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -73,7 +73,7 @@ func New(cfg configs.Config, log *slog.Logger, pool *pgxpool.Pool) (*Server, err
 	s := &Server{
 		cfg:    cfg,
 		log:    log,
-		pool:   pool,
+		db:     db,
 		tokens: security.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL),
 		files:  files,
 		engine: engine,

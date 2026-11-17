@@ -42,7 +42,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	addLog(t, empID, userID, "mobile_phone", `"0800000000"`, `"0811111111"`, "8 days")
 	addLog(t, empID, userID, "address", `null`, `"New address"`, "2 days")
 
-	uc := history.NewUsecase(history.NewRepository(appPool), 7)
+	uc := history.NewUsecase(history.NewRepository(appDB), 7)
 	actor := entity.Actor{UserID: userID, EmployeeID: empID}
 
 	setHistoryDays(t, "7")
@@ -65,7 +65,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 
 func TestHistory_EmptyStates(t *testing.T) {
 	ctx := context.Background()
-	uc := history.NewUsecase(history.NewRepository(appPool), 7)
+	uc := history.NewUsecase(history.NewRepository(appDB), 7)
 
 	// Never edited.
 	userID, empID, _ := newEmployee(t, "0811111111")
@@ -92,7 +92,7 @@ func TestHistory_FilterPagingAndValues(t *testing.T) {
 	addLog(t, empID, userID, "mobile_phone", `"0800000000"`, `"0811111111"`, "3 hours")
 	addLog(t, empID, userID, "address", `null`, `"A"`, "4 hours")
 
-	uc := history.NewUsecase(history.NewRepository(appPool), 7)
+	uc := history.NewUsecase(history.NewRepository(appDB), 7)
 	actor := entity.Actor{UserID: userID, EmployeeID: empID}
 
 	res, err := uc.ListOwn(ctx, history.ListInput{Actor: actor, Field: "mobile_phone"})
@@ -125,7 +125,7 @@ func TestHistory_OnlyOwnEmployee(t *testing.T) {
 	userB, empB, _ := newEmployee(t, "0811111111")
 	addLog(t, empB, userB, "address", `null`, `"B's address"`, "1 hour")
 
-	uc := history.NewUsecase(history.NewRepository(appPool), 7)
+	uc := history.NewUsecase(history.NewRepository(appDB), 7)
 	res, err := uc.ListOwn(ctx, history.ListInput{Actor: entity.Actor{UserID: userA, EmployeeID: empA}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)

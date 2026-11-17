@@ -9,7 +9,7 @@ import (
 )
 
 // Repository is implemented in repository.go. The use case owns the interface,
-// so it never imports sqlc or pgx.
+// so it never imports GORM or pgx.
 type Repository interface {
 	GetProfile(ctx context.Context, employeeID int64) (entity.Profile, error)
 	// WithTx runs fn in one transaction: commit if fn returns nil, otherwise roll back.

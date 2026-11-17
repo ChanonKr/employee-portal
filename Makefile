@@ -1,9 +1,8 @@
-SQLC_IMAGE    := sqlc/sqlc:1.30.0
 MIGRATE_IMAGE := migrate/migrate:v4.19.1
 OWNER_DB_URL  := postgres://owner:owner@localhost:5432/portal?sslmode=disable
 BACKEND       := backend
 
-.PHONY: help env up down reset logs migrate-up migrate-down sqlc sqlc-check run web test test-integration test-web e2e vet
+.PHONY: help env up down reset logs migrate-up migrate-down run web test test-integration test-web e2e vet
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-18s %s\n",$$1,$$2}'
@@ -30,12 +29,6 @@ migrate-up: ## Apply migrations to the running postgres
 migrate-down: ## Roll back the last migration
 	docker run --rm --network host -v $(PWD)/$(BACKEND)/pkg/database/migrations:/migrations $(MIGRATE_IMAGE) \
 		-path=/migrations -database="$(OWNER_DB_URL)" down 1
-
-sqlc: ## Generate Go code from SQL
-	docker run --rm -v $(PWD)/$(BACKEND):/src -w /src $(SQLC_IMAGE) generate
-
-sqlc-check: ## Fail if generated code is out of date (CI)
-	docker run --rm -v $(PWD)/$(BACKEND):/src -w /src $(SQLC_IMAGE) diff
 
 run: env ## Run the API locally against the compose postgres
 	cd $(BACKEND) && set -a && . ../.env && set +a && UPLOAD_DIR=../uploads go run ./app

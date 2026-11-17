@@ -95,7 +95,7 @@ func TestSetSkills_InactiveSkill(t *testing.T) {
 	assert.ElementsMatch(t, []int64{active, retired}, employeeSkillIDs(t, empID))
 
 	// It is still hidden from the picker.
-	catalog, err := skill.NewUsecase(skill.NewRepository(appPool)).ListActive(ctx)
+	catalog, err := skill.NewUsecase(skill.NewRepository(appDB)).ListActive(ctx)
 	require.NoError(t, err)
 	for _, s := range catalog {
 		assert.NotEqual(t, retired, s.ID)

@@ -15,6 +15,7 @@ import (
 	"employee-portal/modules/profile"
 	"employee-portal/modules/setting"
 	"employee-portal/modules/skill"
+	"employee-portal/pkg/database"
 	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/middleware"
 )
@@ -37,7 +38,7 @@ func (s *Server) routes() {
 
 	// ── auth
 	authH := auth.NewHandler(
-		auth.NewUsecase(auth.NewRepository(s.pool), s.tokens),
+		auth.NewUsecase(auth.NewRepository(s.db), s.tokens),
 		auth.CookieOptions{Secure: s.cfg.IsProduction()},
 	)
 	loginPerMinute := s.cfg.LoginRateLimit
@@ -54,7 +55,7 @@ func (s *Server) routes() {
 
 	// ── profile (employee id always comes from the token; the URL has no id)
 	profileH := profile.NewHandler(profile.NewUsecase(profile.Deps{
-		Repo:   profile.NewRepository(s.pool),
+		Repo:   profile.NewRepository(s.db),
 		Photos: imaging.NewProcessor(s.cfg.UploadMaxBytes),
 		Files:  s.files,
 		Log:    s.log,
@@ -78,15 +79,15 @@ func (s *Server) routes() {
 	api.GET("/files/photos/:name", signedIn, ready, fileH.Photo)
 
 	// ── history (read-only; writes happen inside the profile transactions)
-	historyH := history.NewHandler(history.NewUsecase(history.NewRepository(s.pool), s.cfg.HistoryDays))
+	historyH := history.NewHandler(history.NewUsecase(history.NewRepository(s.db), s.cfg.HistoryDays))
 	p.GET("/history", historyH.ListOwn)
 
 	// ── skill catalog (picker)
-	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.pool)))
+	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.db)))
 	api.GET("/skills", signedIn, ready, skillH.List)
 
 	// ── admin (router checks the role; every admin use case checks it again)
-	settingH := setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.pool), s.cfg.HistoryDays))
+	settingH := setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.db), s.cfg.HistoryDays))
 
 	admin := api.Group("/admin", signedIn, ready, middleware.RequireRole(entity.RoleAdmin))
 	admin.GET("/skills", skillH.AdminList)
@@ -96,7 +97,7 @@ func (s *Server) routes() {
 	admin.GET("/settings", settingH.Get)
 	admin.PUT("/settings/history-days", settingH.SetHistoryDays)
 
-	employeeH := employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.pool)))
+	employeeH := employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.db)))
 	admin.GET("/stats", employeeH.Stats)
 	admin.GET("/employees", employeeH.List)
 	admin.GET("/employees/:id", employeeH.Get)
@@ -109,7 +110,7 @@ func (s *Server) routes() {
 func (s *Server) health(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
-	if err := s.pool.Ping(ctx); err != nil {
+	if err := database.Ping(ctx, s.db); err != nil {
 		s.log.WarnContext(ctx, "health check: database unreachable", "error", err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "db": "down"})
 		return

@@ -4,7 +4,7 @@ Employees view and update their own profile: photo, contact details (one field a
 time), and skills, with a change history for the last N days. Admins manage the skill
 catalog and the history window.
 
-**Backend:** Go 1.27 · Gin · PostgreSQL 17 · pgx + sqlc · golang-migrate
+**Backend:** Go 1.27 · Gin · PostgreSQL 17 · GORM (pgx driver) · golang-migrate
 **Frontend:** React 19 · Vite · TypeScript · TanStack Query · React Router · Tailwind CSS · Radix UI
 
 Full design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
@@ -113,7 +113,7 @@ backend/
 │   ├── auth/ profile/ skill/ history/ file/ setting/ employee/
 │   │     handler.go → usecase.go → repository.go
 │   └── server/               router; wires repository → use case → handler
-└── pkg/                      database (migrations, SQL, sqlc), middleware, security, storage, imaging
+└── pkg/                      database (migrations, GORM models), middleware, security, storage, imaging
 ```
 
 ## License

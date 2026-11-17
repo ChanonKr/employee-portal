@@ -4,48 +4,62 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/sqlc"
+	"employee-portal/pkg/database/model"
 )
 
 const settingHistoryDays = "history_days"
 
 type repository struct {
-	q *sqlc.Queries
+	db *gorm.DB
 }
 
-func NewRepository(pool *pgxpool.Pool) Repository {
-	return &repository{q: sqlc.New(pool)}
+func NewRepository(db *gorm.DB) Repository {
+	return &repository{db: db}
 }
 
 func (r *repository) HistoryDays(ctx context.Context) (string, error) {
-	v, err := r.q.GetSetting(ctx, settingHistoryDays)
-	return v, database.MapError(err)
+	var s model.AppSetting
+	err := r.db.WithContext(ctx).Select("value").Where("key = ?", settingHistoryDays).Take(&s).Error
+	return s.Value, database.MapError(err)
 }
 
+// List reads the log newest first. Days 0 = no time window (admin); Field nil = all fields.
 func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error) {
-	params := sqlc.ListHistoryParams{
-		EmployeeID: q.EmployeeID,
-		PageOffset: int32(q.Offset()),
-		PageLimit:  int32(limit),
-	}
+	db := r.db.WithContext(ctx).Model(&model.ProfileChangeLog{}).
+		Select("profile_change_logs.id, profile_change_logs.field, profile_change_logs.old_value, "+
+			"profile_change_logs.new_value, profile_change_logs.changed_at, profile_change_logs.changed_by, "+
+			"users.role AS changed_by_role").
+		Joins("JOIN users ON users.id = profile_change_logs.changed_by").
+		Where("profile_change_logs.employee_id = ?", q.EmployeeID)
 	if q.Days > 0 {
-		d := int32(q.Days)
-		params.Days = &d
+		db = db.Where("profile_change_logs.changed_at >= now() - make_interval(days => ?)", q.Days)
 	}
 	if q.Field != nil {
-		f := string(*q.Field)
-		params.Field = &f
+		db = db.Where("profile_change_logs.field = ?", string(*q.Field))
 	}
 
-	rows, err := r.q.ListHistory(ctx, params)
+	var rows []struct {
+		ID            int64
+		Field         string
+		OldValue      []byte
+		NewValue      []byte
+		ChangedAt     time.Time
+		ChangedBy     int64
+		ChangedByRole string
+	}
+	err := db.Order("profile_change_logs.changed_at DESC").Order("profile_change_logs.id DESC").
+		Limit(limit).Offset(q.Offset()).
+		Find(&rows).Error
 	if err != nil {
 		return nil, database.MapError(err)
 	}
+
 	logs := make([]entity.ChangeLog, len(rows))
 	for i, row := range rows {
 		oldV, err := decode(row.OldValue)
@@ -66,13 +80,22 @@ func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int)
 	return logs, nil
 }
 
+// HasOlder drives the empty state: "No changes yet" vs "No changes in the last N days".
 func (r *repository) HasOlder(ctx context.Context, employeeID int64, days int) (bool, error) {
-	ok, err := r.q.HasOlderHistory(ctx, sqlc.HasOlderHistoryParams{EmployeeID: employeeID, Days: int32(days)})
-	return ok, database.MapError(err)
+	db := r.db.WithContext(ctx)
+	return exists(db, db.Model(&model.ProfileChangeLog{}).
+		Where("employee_id = ? AND changed_at < now() - make_interval(days => ?)", employeeID, days))
 }
 
 func (r *repository) EmployeeExists(ctx context.Context, employeeID int64) (bool, error) {
-	ok, err := r.q.EmployeeExists(ctx, employeeID)
+	db := r.db.WithContext(ctx)
+	return exists(db, db.Model(&model.Employee{}).Where("id = ?", employeeID))
+}
+
+// exists runs SELECT EXISTS (<sub>), which stops at the first matching row.
+func exists(db, sub *gorm.DB) (bool, error) {
+	var ok bool
+	err := db.Raw("SELECT EXISTS (?)", sub.Select("1")).Scan(&ok).Error
 	return ok, database.MapError(err)
 }
 

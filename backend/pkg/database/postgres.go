@@ -5,27 +5,51 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-func NewPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(url)
+// Open connects with GORM (pgx underneath) and checks the connection.
+// Schema changes go through the SQL migrations, never AutoMigrate.
+func Open(ctx context.Context, url string) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(url), &gorm.Config{
+		Logger:                 logger.Discard, // requests are logged by the HTTP middleware
+		SkipDefaultTransaction: true,           // transactions are explicit (WithTx)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse database url: %w", err)
+		return nil, fmt.Errorf("open database: %w", err)
 	}
-	cfg.MaxConns = 10
-	cfg.MaxConnIdleTime = 5 * time.Minute
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("create pool: %w", err)
+		return nil, err
 	}
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
+	if err := sqlDB.PingContext(pingCtx); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	return pool, nil
+	return db, nil
+}
+
+// Close releases the connection pool.
+func Close(db *gorm.DB) {
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+}
+
+// Ping checks the connection (health endpoint).
+func Ping(ctx context.Context, db *gorm.DB) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
 }

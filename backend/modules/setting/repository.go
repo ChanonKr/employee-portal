@@ -2,24 +2,36 @@ package setting
 
 import (
 	"context"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"employee-portal/modules/entity"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/database/sqlc"
+	"employee-portal/pkg/database/model"
 )
 
 type repository struct {
-	q *sqlc.Queries
+	db *gorm.DB
 }
 
-func NewRepository(pool *pgxpool.Pool) Repository {
-	return &repository{q: sqlc.New(pool)}
+func NewRepository(db *gorm.DB) Repository {
+	return &repository{db: db}
 }
 
 func (r *repository) Get(ctx context.Context, key string) (string, entity.HistorySettings, error) {
-	row, err := r.q.GetSettingDetail(ctx, key)
+	var row struct {
+		Value         string
+		UpdatedAt     time.Time
+		UpdatedByID   *int64
+		UpdatedByCode *string
+	}
+	err := r.db.WithContext(ctx).Model(&model.AppSetting{}).
+		Select("app_settings.value, app_settings.updated_at, users.id AS updated_by_id, users.employee_code AS updated_by_code").
+		Joins("LEFT JOIN users ON users.id = app_settings.updated_by").
+		Where("app_settings.key = ?", key).
+		Take(&row).Error
 	if err != nil {
 		return "", entity.HistorySettings{}, database.MapError(err)
 	}
@@ -33,5 +45,10 @@ func (r *repository) Get(ctx context.Context, key string) (string, entity.Histor
 
 func (r *repository) Set(ctx context.Context, key, value string, by entity.Actor) error {
 	uid := by.UserID
-	return database.MapError(r.q.UpsertSetting(ctx, sqlc.UpsertSettingParams{Key: key, Value: value, UpdatedBy: &uid}))
+	s := model.AppSetting{Key: key, Value: value, UpdatedBy: &uid}
+	// INSERT ... ON CONFLICT (key) DO UPDATE
+	return database.MapError(r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value", "updated_by", "updated_at"}),
+	}).Create(&s).Error)
 }

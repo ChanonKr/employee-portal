@@ -1,6 +1,6 @@
 # Employee Profile Portal — Design Document
 
-> Full Stack Developer Assignment · Frontend: React (Vite) · Backend: Go (Gin) · DB: PostgreSQL 17 (pgx + sqlc)
+> Full Stack Developer Assignment · Frontend: React (Vite) · Backend: Go (Gin) · DB: PostgreSQL 17 (GORM + pgx)
 
 ---
 
@@ -35,7 +35,7 @@
 - มี 2 role: `employee`, `admin` — บัญชีถูกสร้างโดย HR/Admin (ไม่มี sign-up)
 - "7 วัน" = ช่วงที่**แสดง** ไม่ใช่ช่วงที่**เก็บ** → เก็บ log ทั้งหมด, purge เป็น optional job
 - Change history อยู่ใน PostgreSQL ตัวเดียวกัน เพื่อให้ update + log อยู่ใน transaction เดียว (ไม่แยก Mongo — ดู §12)
-- **Business logic อยู่ใน Go (service layer)** · SQL เป็น query ธรรมดาที่ generate เป็นโค้ด Go ด้วย sqlc · transaction ควบคุมจาก service
+- **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน `repository.go`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
 
 ---
 
@@ -46,7 +46,7 @@
 │  React SPA (Vite+TS) │ ──────────────────────────▶ │  Go API (Gin)               │
 │  TanStack Query      │ ◀────────────────────────── │  handler → service → repo   │
 └──────────────────────┘   httpOnly JWT cookie       └──────┬───────────────┬──────┘
-                                                             │ pgx (sqlc)    │ write/read file
+                                                             │ GORM (pgx)    │ write/read file
                                                              ▼               ▼
                                                     ┌────────────────┐ ┌──────────────┐
                                                     │ PostgreSQL 17  │ │ File storage │
@@ -60,8 +60,8 @@
 |---|---|
 | Frontend | React 19 + TypeScript 5.9, Vite 8, React Router 8, TanStack Query 5, React Hook Form + Zod 4, Tailwind 4 + Radix UI (component เขียนเองแบบ shadcn), sonner (toast), Vitest + Testing Library, Playwright |
 | HTTP | `gin-gonic/gin`, `gin-contrib/cors` |
-| DB driver | `jackc/pgx/v5` (`pgxpool`) |
-| Query | `sqlc` — เขียน SQL ในไฟล์ `.sql` → generate ฟังก์ชัน Go แบบ type-safe (ตรวจ query ตั้งแต่ตอน generate) |
+| DB driver | `jackc/pgx/v5` (ผ่าน `gorm.io/driver/postgres`) |
+| ORM | `gorm.io/gorm` — query builder + struct mapping · **ไม่ใช้ AutoMigrate** (schema, grants และ seed อยู่ใน SQL migration) |
 | Migration | `golang-migrate/migrate` |
 | Auth | `golang-jwt/jwt/v5`, `golang.org/x/crypto/bcrypt` |
 | Config | `caarlos0/env` (อ่านจาก env / `.env`) |
@@ -101,12 +101,11 @@ employee-portal/
 │   │   ├── employee/                   # Admin → Employees (list, search, detail) + Dashboard stats
 │   ├── pkg/
 │   │   ├── database/
-│   │   │   ├── postgres.go             # pgxpool + ping
-│   │   │   ├── tx.go                   # WithTx(ctx, pool, fn(*sqlc.Queries))
-│   │   │   ├── errors.go               # pg error → entity error
+│   │   │   ├── postgres.go             # Open (*gorm.DB) + Ping + Close
+│   │   │   ├── tx.go                   # WithTx(ctx, db, fn(*gorm.DB))
+│   │   │   ├── errors.go               # gorm / pg error → entity error
 │   │   │   ├── migrations/             # golang-migrate: init, grants, seed_demo
-│   │   │   ├── queries/*.sql           # input ของ sqlc
-│   │   │   └── sqlc/                   # generated (ห้ามแก้มือ)
+│   │   │   └── model/                  # GORM structs (ตรงกับตาราง) + ToEntity() + scopes
 │   │   ├── middleware/                 # requestid, logger, recover, auth, rbac, ratelimit, headers, timeout
 │   │   ├── httputil/                   # error envelope (WriteError), ETag / If-Match
 │   │   ├── security/                   # jwt.go, password.go (bcrypt)
@@ -114,7 +113,6 @@ employee-portal/
 │   │   ├── imaging/                    # ตรวจ magic bytes, resize ≤ 512, re-encode JPEG
 │   ├── db-init/01_roles.sql            # สร้าง role app (LOGIN) ตอน postgres init ครั้งแรก — local dev
 │   ├── tests/integration/              # testcontainers Postgres 17 (build tag: integration)
-│   ├── sqlc.yaml
 │   ├── Dockerfile                      # distroless, nonroot
 │   └── go.mod
 ├── frontend/
@@ -129,7 +127,7 @@ employee-portal/
 │   └── Dockerfile
 ├── docs/                               # DESIGN.md, screenshots
 ├── docker-compose.yml
-├── Makefile                            # up, down, migrate, sqlc, seed, test, lint
+├── Makefile                            # up, down, migrate, test, e2e, vet
 ├── .env.example
 ├── .github/workflows/ci.yml
 ├── LICENSE
@@ -207,78 +205,70 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 
 ---
 
-## 5. Data Access (sqlc + transaction ใน service)
+## 5. Data Access (GORM + transaction ใน service)
 
 ### 5.1 แนวทาง
 - **Logic อยู่ใน Go service**: validation, diff สำหรับ history, ตรวจสิทธิ์, จัดการ transaction
-- **SQL อยู่ในไฟล์ `.sql`** → `sqlc generate` ได้ฟังก์ชัน Go ที่ type-safe; ตอน walkthrough อ่าน SQL จริงได้ทุกบรรทัด
+- **GORM อยู่แค่ใน `repository.go`** — use case และ entity ไม่ import GORM · struct ของ GORM (`pkg/database/model`) แยกจาก entity และแปลงด้วย `ToEntity()`
+- **Schema ไม่ให้ GORM สร้าง**: ตาราง, CHECK, grants (log append-only) และ seed อยู่ใน SQL migration · model ใส่ tag `default` ให้คอลัมน์ที่มีค่า default ใน DB เพื่อไม่ให้ GORM เขียน `false`/`0` ทับ
 - **ทุก use case ที่เขียนข้อมูล** = 1 transaction: lock แถว → update (เช็ก version) → insert log → commit
+- `SkipDefaultTransaction: true` — ไม่ให้ GORM เปิด transaction ซ้อนเอง ทุก transaction มาจาก `WithTx`
 
-### 5.2 Queries หลัก
-| Query (sqlc name) | ชนิด | ใช้ที่ |
+### 5.2 Query หลัก (ใน repository)
+| Repository method | GORM | ใช้ที่ |
 |---|---|---|
-| `GetUserByCode` | `:one` | Login |
-| `GetSetting` / `UpsertSetting` | `:one` / `:exec` | F6, Admin |
-| `GetProfile` | `:one` | F1 |
-| `GetProfileForUpdate` | `:one` (`FOR UPDATE`) | อ่านค่าเดิม + lock แถวก่อนแก้ |
-| `ListEmployeeSkills` | `:many` | F1, F5 (ชุดเดิม) |
-| `ListActiveSkills` | `:many` | F5 (picker) |
-| `GetSkillsByIDs` | `:many` | F5 — คืนทั้ง active/inactive เพื่อแยก "ไม่มีจริง" กับ "ถูกปิด" |
-| `UpdateContactField` | `:one` (`RETURNING version`) | F4 |
-| `UpdatePhoto` | `:one` | F3 |
-| `BumpVersion` | `:one` | F5 (skills ไม่ได้อยู่ในตาราง employees) |
-| `DeleteEmployeeSkills` / `InsertEmployeeSkills` | `:exec` | F5 |
-| `InsertChangeLog` | `:exec` | ทุกการแก้ไข |
-| `ListHistory` / `HasOlderHistory` | `:many` / `:one` | F6 |
-| `Admin*` (list/upsert/toggle/reorder skills, list employees, update name, stats) | – | X3–X4 |
+| `GetUserByCode` / `GetUserByID` | `Model(&User{}).Joins("LEFT JOIN employees ...").Take` | Login, `/auth/me` |
+| `GetProfile` | `Joins` users + `Scopes(model.SkillsOf(id))` | F1 |
+| `GetForUpdate` | `Clauses(clause.Locking{Strength: "UPDATE"}).Take` | อ่านค่าเดิม + lock แถวก่อนแก้ |
+| `SaveContact` / `SavePhoto` / `SaveName` / `BumpVersion` | `Where("id = ? AND version = ?").Updates(map)` + `version = version + 1` · `RowsAffected == 0` → `ErrConflict` | F3, F4, F5, แก้ชื่อ |
+| `GetSkillsByIDs` | `Where("id IN ?", ids)` | F5 — คืนทั้ง active/inactive เพื่อแยก "ไม่มีจริง" กับ "ถูกปิด" |
+| `ReplaceSkills` | `Delete` + `Create(&[]EmployeeSkill{...})` (batch insert) | F5 |
+| `AppendChange` | `Create(&ProfileChangeLog{})` (JSONB เป็น `[]byte`, nil = NULL) | ทุกการแก้ไข |
+| `List` (history) / `HasOlder` | `Where` ต่อกันตาม filter ที่มี · `SELECT EXISTS (subquery)` | F6 |
+| `Set` (settings) | `Clauses(clause.OnConflict{...}).Create` (upsert) | Admin |
+| `Reorder` (skills) | `Update` ทีละแถวใน `WithTx` · id ไม่มีจริง → rollback ทั้งชุด | Admin |
+| `Stats` | `Select` + `count(*) FILTER (...)`, `Group`, `Joins` | Dashboard |
 
-### 5.3 ตัวอย่าง SQL
-```sql
--- name: GetProfileForUpdate :one
-SELECT id, first_name, last_name, photo_path, mobile_phone, contact_email, address, version
-FROM employees
-WHERE id = $1
-FOR UPDATE;
+### 5.3 ตัวอย่าง
+```go
+// modules/profile/repository.go — optimistic lock: เขียนได้เฉพาะเมื่อ version ยังตรง
+func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map[string]any) (int32, error) {
+    fields["version"] = gorm.Expr("version + 1")
+    fields["updated_at"] = gorm.Expr("now()")
+    res := t.db.WithContext(ctx).Model(&model.Employee{}).
+        Where("id = ? AND version = ?", e.ID, e.Version).
+        Updates(fields)                       // map: ส่ง NULL ได้ (struct จะข้าม zero value)
+    if res.Error != nil {
+        return 0, database.MapError(res.Error)
+    }
+    if res.RowsAffected == 0 {
+        return 0, entity.ErrConflict
+    }
+    return e.Version + 1, nil
+}
 
--- name: UpdateContactField :one
--- column ถูกเลือกจาก whitelist ใน Go (contactRules) แล้วส่งชื่อเข้ามาเป็นค่า ไม่ใช่ประกอบ SQL เอง
-UPDATE employees SET
-  mobile_phone  = CASE WHEN sqlc.arg(field)::text = 'mobile_phone'  THEN sqlc.narg(value)::text ELSE mobile_phone  END,
-  contact_email = CASE WHEN sqlc.arg(field)::text = 'contact_email' THEN sqlc.narg(value)::text ELSE contact_email END,
-  address       = CASE WHEN sqlc.arg(field)::text = 'address'       THEN sqlc.narg(value)::text ELSE address       END,
-  version       = version + 1,
-  updated_at    = now()
-WHERE id = sqlc.arg(id) AND version = sqlc.arg(version)
-RETURNING version;
+func (t *txRepository) SaveContact(ctx context.Context, e entity.Employee, f entity.ContactField) (int32, error) {
+    col := contactColumn[f]                   // ชื่อ column จาก whitelist เท่านั้น
+    return t.update(ctx, e, map[string]any{col: e.Contact(f)})
+}
 
--- name: InsertEmployeeSkills :exec
-INSERT INTO employee_skills (employee_id, skill_id)
-SELECT sqlc.arg(employee_id), unnest(sqlc.arg(skill_ids)::bigint[]);
-
--- name: ListHistory :many
--- days NULL = no time window (admin). field NULL = all fields.
--- Fetch page_limit = pageSize + 1 rows to know whether a next page exists.
-SELECT l.id, l.field, l.old_value, l.new_value, l.changed_at, l.changed_by, u.role AS changed_by_role
-FROM profile_change_logs l
-JOIN users u ON u.id = l.changed_by
-WHERE l.employee_id = sqlc.arg(employee_id)
-  AND (sqlc.narg(days)::int IS NULL OR l.changed_at >= now() - make_interval(days => sqlc.narg(days)::int))
-  AND (sqlc.narg(field)::text IS NULL OR l.field = sqlc.narg(field)::text)
-ORDER BY l.changed_at DESC, l.id DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
-
--- name: HasOlderHistory :one
-SELECT EXISTS (
-  SELECT 1 FROM profile_change_logs
-  WHERE employee_id = sqlc.arg(employee_id)
-    AND changed_at < now() - make_interval(days => sqlc.arg(days)::int)
-);
+// modules/history/repository.go — เงื่อนไขต่อกันตามที่มี (days 0 = admin ไม่จำกัดช่วง)
+db := r.db.WithContext(ctx).Model(&model.ProfileChangeLog{}).
+    Joins("JOIN users ON users.id = profile_change_logs.changed_by").
+    Where("profile_change_logs.employee_id = ?", q.EmployeeID)
+if q.Days > 0 {
+    db = db.Where("profile_change_logs.changed_at >= now() - make_interval(days => ?)", q.Days)
+}
+if q.Field != nil {
+    db = db.Where("profile_change_logs.field = ?", string(*q.Field))
+}
+db.Order("changed_at DESC").Order("id DESC").Limit(pageSize + 1).Offset(offset).Find(&rows)
 ```
-- `days` เป็น nullable → `/admin/employees/:id/history` ใช้ query เดียวกันได้โดยไม่จำกัดช่วงเวลา
+- ใช้ `Updates(map)` ไม่ใช่ `Updates(struct)` — struct ข้ามค่า zero/nil ทำให้ "ลบเบอร์โทร" (NULL) ไม่ถูกเขียน
 - `hasNext` ได้จากการดึงเกินมา 1 แถว (ไม่ต้อง `COUNT(*)`) · index `(employee_id, changed_at DESC)` รองรับทั้ง filter และ sort
 
 ### 5.4 Transaction (ตัวอย่าง: แก้ contact)
-Use case ไม่รู้จัก sqlc/pgx: เรียก `WithTx` ผ่าน interface `Repository` ที่ use case ประกาศเอง และกฎธุรกิจอยู่ใน `entity.Employee.ChangeContact`
+Use case ไม่รู้จัก GORM/pgx: เรียก `WithTx` ผ่าน interface `Repository` ที่ use case ประกาศเอง และกฎธุรกิจอยู่ใน `entity.Employee.ChangeContact`
 ```go
 // modules/profile/usecase.go
 type Repository interface {
@@ -317,15 +307,15 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
     return newVersion, err
 }
 ```
-- `repository.go` แปลง sqlc row ↔ entity, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น entity error ผ่าน `database.MapError`
+- `repository.go` แปลง GORM model ↔ entity, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น entity error ผ่าน `database.MapError`
 - ตรวจ version หลัง `FOR UPDATE` → แยก 404 (ไม่มีแถว) กับ 409 (version ไม่ตรง) ได้ชัด
 - Unit test ของ use case ใช้ fake repository (in-memory) ส่วน transaction, lock และ rollback จริงทดสอบใน `tests/integration`
 - `SetSkills`: ลำดับเดียวกัน แต่ใช้ `ReplaceSkills` + `BumpVersion` แทน `SaveContact` (รายละเอียด §8)
 
-### 5.5 Error Mapping (pg → domain → HTTP)
+### 5.5 Error Mapping (GORM/pg → domain → HTTP)
 | PostgreSQL | ความหมาย | Domain error | HTTP |
 |---|---|---|---|
-| `pgx.ErrNoRows` | ไม่พบข้อมูล | `ErrNotFound` | 404 |
+| `gorm.ErrRecordNotFound` | ไม่พบข้อมูล | `ErrNotFound` | 404 |
 | `23505` unique_violation | ชื่อ skill ซ้ำ | `ErrDuplicate` | 409 `ALREADY_EXISTS` |
 | `23514` check_violation | ละเมิด CHECK (เช่น เบอร์ผิดรูปแบบ) | `ErrValidation` | 400 |
 | `23503` foreign_key_violation | อ้างอิง id ที่ไม่มี | `ErrValidation` | 400 |
@@ -441,16 +431,16 @@ Gin router
   → middleware : RequestID → Recover → Logger(slog) → SecureHeaders → CORS → Timeout → BodyLimit
                  (ต่อ route) RateLimit → Auth(JWT cookie) → RequireProfile / RequireRole
   → handler.go    : bind JSON, อ่าน If-Match, เรียก Usecase, เขียน envelope ผ่าน httputil.WriteError
-  → usecase.go    : ลำดับขั้นของ use case + transaction — ไม่รู้จัก Gin / sqlc / pgx
+  → usecase.go    : ลำดับขั้นของ use case + transaction — ไม่รู้จัก Gin / GORM / pgx
   → entity        : กฎธุรกิจ (normalize, validate, version, diff สำหรับ history)
-  → repository.go : เรียก sqlc, แปลง row ↔ entity, map pg error → entity error
+  → repository.go : query ด้วย GORM, แปลง model ↔ entity, map error → entity error
 ```
 
 **Dependency rule** (ลูกศร = import):
 ```
 handler.go ──▶ usecase.go ──▶ entity
                    ▲
-repository.go ─────┘ (implements interface ที่ usecase.go ประกาศ) ──▶ pkg/database/sqlc
+repository.go ─────┘ (implements interface ที่ usecase.go ประกาศ) ──▶ pkg/database (GORM, model)
 ```
 - `entity` ไม่ import อะไรในโปรเจกต์เลย
 - handler / usecase / repository อยู่ใน package เดียวกัน (ชื่อสั้น: `profile.NewUsecase`, ไม่ต้อง alias) คุม layer ด้วยการให้แต่ละชั้นรู้จักแค่ interface ของชั้นถัดไป
@@ -496,22 +486,14 @@ var contactColumn = map[entity.ContactField]string{
 - Unit test เป็น table-driven ใน `entity/contact_test.go`
 - ชื่อ column มาจาก map เท่านั้น — ไม่มีการประกอบ SQL จาก input ผู้ใช้
 
-### 7.4 Transaction (pgx)
+### 7.4 Transaction (GORM)
 ```go
 // pkg/database/tx.go
-func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(q *sqlc.Queries) error) error {
-    tx, err := pool.Begin(ctx)
-    if err != nil {
-        return err
-    }
-    defer tx.Rollback(ctx)                 // no-op ถ้า commit แล้ว
-    if err := fn(sqlc.New(tx)); err != nil {
-        return err
-    }
-    return tx.Commit(ctx)
+func WithTx(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error {
+    return db.WithContext(ctx).Transaction(fn)   // commit ถ้า nil, rollback ถ้า error หรือ panic
 }
 ```
-Repository ของแต่ละ module ห่อ `WithTx` เป็น `WithTx(ctx, fn func(TxRepository) error)` เพื่อไม่ให้ `*sqlc.Queries` หลุดออกไปถึง use case
+Repository ของแต่ละ module ห่อ `WithTx` เป็น `WithTx(ctx, fn func(TxRepository) error)` เพื่อไม่ให้ `*gorm.DB` หลุดออกไปถึง use case
 
 ### 7.5 Flow อัปโหลดรูป (ไฟล์ + DB ให้สอดคล้องกัน)
 ```
@@ -756,12 +738,12 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 
 | ด้าน | สิ่งที่ทำ |
 |---|---|
-| Security | JWT httpOnly cookie, bcrypt, rate limit, `MaxBytesReader`, magic-byte check, ไฟล์ตั้งชื่อด้วย UUID (กัน path traversal), CORS allowlist, secure headers, SQL ผ่าน sqlc (parameterized ทั้งหมด), DB role แยก owner/app |
+| Security | JWT httpOnly cookie, bcrypt, rate limit, `MaxBytesReader`, magic-byte check, ไฟล์ตั้งชื่อด้วย UUID (กัน path traversal), CORS allowlist, secure headers, SQL ผ่าน GORM (parameterized ทั้งหมด, ชื่อ column จาก whitelist), DB role แยก owner/app |
 | Data integrity | update + log ใน transaction เดียว (service + `TxManager`), `SELECT ... FOR UPDATE` + optimistic locking (`version`), CHECK constraint, log append-only ระดับสิทธิ์ DB |
 | Observability | slog JSON, request-id ใน log + error response, `/healthz` (ping DB) |
 | Reliability | graceful shutdown, `pgxpool` settings, timeout ต่อ request (context) |
 | Testing | Unit (service, mock repo, table-driven) · Integration (testcontainers Postgres + migrations — transaction, lock, rollback จริง) · FE (Vitest + RTL) · E2E (Playwright: login → แก้เบอร์ → เห็นใน Recent changes / history) รันหลาย viewport (iPhone 13, iPad, 1280px) |
-| CI | GitHub Actions: golangci-lint, `sqlc diff` (โค้ด generate ตรงกับ SQL), go test, eslint, vitest, build docker images, gitleaks |
+| CI | GitHub Actions: golangci-lint, go test, eslint, vitest, build docker images, gitleaks |
 | DevEx | `docker compose up` ครั้งเดียวรันได้ครบ, Makefile, `.env.example`, seed users, OpenAPI spec |
 
 ### 10.1 Test Cases สำคัญ
@@ -825,7 +807,7 @@ volumes: { pg-data: {}, uploads: {} }
 |---|---|---|
 | PostgreSQL + logic ใน Go service (ไม่ใช้ Stored Procedure) | ตรงทิศทางทีม (ย้ายจาก MySQL SP), test/debug ใน Go ง่าย, logic อยู่ที่เดียวกับโค้ด, ไม่ผูกกับ DB | ต้องจัดการ transaction เองใน service → `TxManager` + integration test |
 | Gin (ไม่ใช่ Fiber) | อยู่บน `net/http` มาตรฐาน: ใช้ `httptest` และ middleware ของ ecosystem ได้, ส่ง `context.Context` ลง pgx ตรง ๆ, ไม่มี pitfall เรื่อง buffer reuse ของ fasthttp | benchmark ช้ากว่า Fiber — ไม่มีผลเพราะคอขวดอยู่ที่ DB และการ resize รูป |
-| sqlc แทน ORM (GORM) | SQL ชัดเจน อ่าน/อธิบายได้ทุกบรรทัด, type-safe, query ผิดเจอตอน generate (CI: `sqlc diff`), ไม่มีพฤติกรรมแฝง (N+1, zero-value), ใช้ feature ของ Postgres ได้เต็มที่ (`FOR UPDATE`, `RETURNING`, JSONB) | dynamic query ทำยากกว่า → ใช้ `sqlc.narg` + CASE · ถ้าต้อง dynamic จริงใช้ pgx `CollectRows` ใน repository เดียวกัน · sqlc อยู่แค่ใน `repository.go` จึงเปลี่ยนเป็น GORM ได้โดยไม่แตะ use case |
+| GORM (ORM) แทน sqlc | เขียน query ใน Go ได้เลยไม่ต้อง generate, dynamic filter (history, ค้นหาพนักงาน) ต่อ `Where` ได้ตรง ๆ, upsert/locking มี clause ให้, ทีมส่วนใหญ่คุ้นเคย | พฤติกรรมแฝงต้องระวัง: `Updates(struct)` ข้าม zero value (→ ใช้ map), insert เขียน `false`/`0` ทับ DB default (→ tag `default`), query ผิดเจอตอนรันไม่ใช่ตอน build (→ integration test ครอบทุก repository) · ไม่ใช้ AutoMigrate · GORM อยู่แค่ใน `repository.go` (เดิมใช้ sqlc แล้วเปลี่ยนได้โดยไม่แตะ use case/entity/test ของ use case) |
 | Clean Architecture แบบ Package by Feature (1 module = 1 package) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, ชื่อสั้นไม่ stutter (`profile.NewUsecase`), กฎธุรกิจอยู่ใน `entity` ทดสอบได้โดยไม่มี DB | คอมไพเลอร์ไม่บังคับ layer ภายใน module → คุมด้วย interface · module ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
 | Transaction + `FOR UPDATE` + `version` | กันแก้ทับกัน, แยก 404/409 ชัด, log ไม่หลุดจาก update | lock แถวสั้น ๆ ระหว่าง transaction (ไม่มีผลที่ scale นี้) |
 | History เขียนใน service (ไม่ใช้ DB trigger) | diff ที่อ่านง่าย (skills เป็นชื่อ), รู้ว่าใครแก้จาก context, test ใน Go ได้ | ถ้ามีคนแก้ DB ตรง ๆ จะไม่มี log → ชดเชยด้วยสิทธิ์ DB role `app` (trigger เป็นทางเลือกในอนาคต) |
@@ -851,7 +833,7 @@ volumes: { pg-data: {}, uploads: {} }
 |---|---|---|
 | 1 | Repo (public), docker-compose, Makefile, `.env.example`, `.gitignore`, LICENSE | `make up` แล้ว Postgres healthy |
 | 2 | Migration: tables + roles/grants + seed users/skills/settings | `make migrate seed` ผ่าน |
-| 3 | SQL queries + `sqlc generate` + `TxManager` | `go build` ผ่าน, `sqlc diff` สะอาด |
+| 3 | GORM models + repositories + `WithTx` | `go build` ผ่าน, integration test ผ่าน |
 | 4 | Go skeleton: config, router, middleware, error envelope, `/healthz` | `curl /healthz` ok |
 | 5 | **Vertical slice:** `GET /profile` + `PUT /profile/contact/:field` (service + transaction + log) ครบทุกชั้น + หน้า Profile | แก้เบอร์จาก UI ได้จริง และเห็น log |
 | 6 | Auth (login/logout/me/middleware) | ต้อง login ก่อนเข้า `/profile/*` |
