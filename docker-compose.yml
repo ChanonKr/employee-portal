@@ -1,0 +1,40 @@
+# Local development only. Passwords here are public demo values.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: portal
+      POSTGRES_USER: owner
+      POSTGRES_PASSWORD: owner
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U owner -d portal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports: ["5432:5432"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./backend/db-init:/docker-entrypoint-initdb.d:ro
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - ./backend/pkg/database/migrations:/migrations:ro
+    command: ["-path=/migrations", "-database=postgres://owner:owner@postgres:5432/portal?sslmode=disable", "up"]
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/portal?sslmode=disable
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    ports: ["8080:8080"]
+    volumes:
+      - uploads:/data/uploads
+
+volumes:
+  pg-data: {}
+  uploads: {}
