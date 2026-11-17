@@ -342,6 +342,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | POST | `/auth/login` | – | `{employeeCode, password}` | 204 + Set-Cookie |
 | POST | `/auth/logout` | ✔ | – | 204 |
 | GET | `/auth/me` | ✔ | – | `{userId, employeeId, employeeCode, role, mustChangePassword}` (ใช้ตอนแอปโหลด) |
+| POST | `/auth/change-password` | ✔ | `{currentPassword, newPassword}` | 204 + Set-Cookie ใหม่ (ไม่มี flag `mcp`) · รหัสเดิมผิด → **400** (ไม่ใช่ 401 เพื่อไม่ให้ FE เด้งออก) |
 | GET | `/profile` | ✔ | – | `Profile` + header `ETag: "<version>"` |
 | PUT | `/profile/contact/:field` | ✔ | `field` = `mobile` \| `email` \| `address` · body `{value}` + `If-Match` | `{version}` · field อื่น → 400 |
 | PUT | `/profile/photo` | ✔ | multipart `file` + `If-Match` | `{version, photoUrl}` |
@@ -367,6 +368,8 @@ module: จัดการ skill อยู่ใน `skill/` (เจ้าขอ
 | GET | `/admin/employees/:id` | – | `Profile` + `role`, `isActive`, skills มี `isActive` · `ETag` สำหรับแก้ชื่อ |
 | GET | `/admin/employees/:id/history` | `?field=&page=&pageSize=` | รูปเดียวกับ `/profile/history` แต่ `days: null` = ทั้งหมด (ไม่จำกัดช่วงเวลา) · 404 ถ้าไม่มีพนักงาน |
 | PUT | `/admin/employees/:id/name` | `{firstName, lastName}` (trim, 1–100) + `If-Match` | `{version}` · log `first_name` / `last_name` แยกแถว, `changed_by` = admin |
+| POST | `/admin/employees` | `{employeeCode, firstName, lastName, role?}` | 201 `{id, employeeCode, temporaryPassword}` · สร้าง user + employee ใน transaction เดียว · รหัสชั่วคราวแสดงครั้งเดียว · 409 ถ้ารหัสพนักงานซ้ำ |
+| POST | `/admin/employees/:id/reset-password` | – | `{temporaryPassword}` · บังคับเปลี่ยนรหัสตอน login ครั้งถัดไป |
 
 ### 6.1 ตัวอย่าง Response
 ```json
@@ -405,6 +408,7 @@ module: จัดการ skill อยู่ใน `skill/` (เจ้าขอ
 | `VALIDATION_ERROR` (มี `fields`) | 400 |
 | `UNAUTHORIZED` | 401 |
 | `FORBIDDEN` | 403 |
+| `PASSWORD_CHANGE_REQUIRED` | 403 |
 | `NOT_FOUND` | 404 |
 | `METHOD_NOT_ALLOWED` | 405 |
 | `VERSION_CONFLICT` | 409 |
@@ -536,7 +540,9 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
   admin := api.Group("/admin", mw.Auth(), mw.RequireRole("admin"))
   ```
 - Rate limit `/auth/login` 5 req/นาที/IP, upload 10 req/นาที/user
-- *(X5)* ถ้า `must_change_password = TRUE` → API ทุกตัวยกเว้น `/auth/*` ตอบ 403 `PASSWORD_CHANGE_REQUIRED` จนกว่าจะเรียก `POST /auth/change-password`
+- *(X5)* บัญชีใหม่และบัญชีที่ถูก reset มี `must_change_password = TRUE` → login ใส่ claim `mcp` ใน JWT → middleware `RequirePasswordChanged` ทำให้ API ทุกตัวยกเว้น `/auth/*` ตอบ 403 `PASSWORD_CHANGE_REQUIRED` จนกว่าจะเรียก `POST /auth/change-password` (ได้ cookie ใหม่ที่ไม่มี `mcp`)
+  - รหัสชั่วคราว 12 ตัวจาก `crypto/rand` (ไม่มี 0/O/1/l/I) · เก็บแค่ bcrypt hash · policy รหัสใหม่: ≥ 8 ตัว, ≤ 72 bytes, มีตัวอักษรและตัวเลข, ต้องไม่ซ้ำรหัสเดิม
+  - ข้อจำกัด: JWT แบบ stateless → reset รหัสแล้ว session เดิมของผู้ใช้ยังใช้ได้จนหมดอายุ (≤ 8 ชม.) · ทางแก้ในอนาคต: `token_version` ใน users แล้วเช็กใน middleware
 
 ### 7.7 Config (env)
 | Key | Default | ใช้ทำอะไร |

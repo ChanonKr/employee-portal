@@ -35,6 +35,7 @@ Other commands: `make help`.
 | POST | `/auth/login` | `{employeeCode, password}` → HttpOnly session cookie |
 | POST | `/auth/logout` | |
 | GET  | `/auth/me` | |
+| POST | `/auth/change-password` | `{currentPassword, newPassword}`; required after a temporary password |
 | GET  | `/profile` | `ETag: "<version>"` |
 | PUT  | `/profile/contact/:field` | `mobile` \| `email` \| `address`, body `{value}`, header `If-Match` |
 | PUT  | `/profile/photo` | multipart `file` (JPEG/PNG/WebP ≤ 5 MB), `If-Match` |
@@ -53,6 +54,8 @@ Admin only (`/api/v1/admin`, checked in the router and again in each use case):
 | GET | `/employees/:id` | profile + role |
 | GET | `/employees/:id/history` | all time (`days: null`) |
 | PUT | `/employees/:id/name` | `{firstName, lastName}`, `If-Match`; the only way to change a name |
+| POST | `/employees` | create account + profile; returns a one-time temporary password |
+| POST | `/employees/:id/reset-password` | new temporary password; user must change it at next sign-in |
 | GET / POST | `/skills` | list with usage / create |
 | PATCH | `/skills/:id` | `{name?, isActive?}`; skills are turned off, never deleted |
 | PUT | `/skills/order` | `[{id, sortOrder}]`, all or nothing |
