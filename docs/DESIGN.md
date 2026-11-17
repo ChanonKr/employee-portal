@@ -96,7 +96,8 @@ employee-portal/
 │   │   ├── profile/                    # handler.go · usecase.go · usecase_test.go · repository.go (รวม PUT /profile/skills)
 │   │   ├── skill/                      # GET /skills (catalog สำหรับ picker)
 │   │   ├── history/                    # GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
-│   │   ├── file/ · admin/              # (ขั้นถัดไป) โครงเดียวกัน
+│   │   ├── file/                       # GET /files/photos/:name (handler อย่างเดียว — stream ไฟล์)
+│   │   ├── admin/                      # (ขั้นถัดไป) โครงเดียวกัน
 │   ├── pkg/
 │   │   ├── database/
 │   │   │   ├── postgres.go             # pgxpool + ping
@@ -108,7 +109,8 @@ employee-portal/
 │   │   ├── middleware/                 # requestid, logger, recover, auth, rbac, ratelimit, headers, timeout
 │   │   ├── httputil/                   # error envelope (WriteError), ETag / If-Match
 │   │   ├── security/                   # jwt.go, password.go (bcrypt)
-│   │   ├── storage/ · imaging/         # (ขั้นถัดไป) FileStorage, resize รูป
+│   │   ├── storage/                    # Local: ชื่อ UUID, เขียน temp → rename, Open/Delete ตรวจชื่อ
+│   │   ├── imaging/                    # ตรวจ magic bytes, resize ≤ 512, re-encode JPEG
 │   ├── db-init/01_roles.sql            # สร้าง role app (LOGIN) ตอน postgres init ครั้งแรก — local dev
 │   ├── tests/integration/              # testcontainers Postgres 17 (build tag: integration)
 │   ├── sqlc.yaml
@@ -505,12 +507,18 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
 
 ### 7.5 Flow อัปโหลดรูป (ไฟล์ + DB ให้สอดคล้องกัน)
 ```
-1. ตรวจขนาด/ชนิด → decode → resize
-2. storage.Save()                         → newPath
-3. tx: lock → เช็ก version → UpdatePhoto(newPath) → InsertChangeLog
-   ├─ error → storage.Delete(newPath)     (rollback ไฟล์ใหม่) → return error
-   └─ ok    → storage.Delete(oldPath)     (best-effort, log ถ้าพลาด)
+1. imaging.Normalize: อ่านไม่เกิน UPLOAD_MAX_BYTES → magic bytes (jpeg/png/webp)
+   → DecodeConfig (≤ 40 MP กัน decompression bomb) → decode + หมุนตาม EXIF
+   → Fit 512×512 (ไม่ขยายรูปเล็ก) → ปูพื้นขาว (PNG โปร่งใส) → JPEG q85 (ตัด metadata/GPS ทิ้ง)
+2. storage.Save()                         → <uuid>.jpg (เขียน temp แล้ว rename)
+3. tx: lock → emp.ChangePhoto(name, version) → SavePhoto → AppendChange
+   ├─ error → storage.Delete(new)         (ไม่เหลือไฟล์กำพร้า) → return error
+   └─ ok    → storage.Delete(old)         (best-effort, log ถ้าพลาด)
 ```
+- Body limit แยก route: JSON 64 KB · `PUT /profile/photo` = `UPLOAD_MAX_BYTES` + 64 KB (หัว multipart) · rate limit 10 ครั้ง/นาที/ผู้ใช้
+- เกินขนาด → 413 `PAYLOAD_TOO_LARGE` · ไม่ใช่ jpeg/png/webp (ดูจาก magic bytes ไม่ใช่นามสกุล) → 415 `UNSUPPORTED_MEDIA_TYPE` · ไฟล์เสีย → 400
+- `GET /files/photos/:name` ต้อง login · ชื่อไฟล์ต้องตรง `<uuid>.jpg` ไม่งั้น 404 (กัน path traversal) · `Cache-Control: private, max-age=31536000, immutable` (ชื่อไม่ซ้ำต่อการอัปโหลด)
+- history ของ photo เก็บชื่อไฟล์ (`old_value` / `new_value`)
 
 ### 7.6 Auth & RBAC
 - Login: `GetUserByCode` → ตรวจ `is_active` → `bcrypt.CompareHashAndPassword` → ออก JWT (HS256, `sub=user_id`, `emp=employee_id`, `role`, exp 8 ชม.)
