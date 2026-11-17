@@ -145,6 +145,17 @@ func (t *txRepository) ReplaceSkills(ctx context.Context, employeeID int64, skil
 	}))
 }
 
+func (t *txRepository) SavePhoto(ctx context.Context, e entity.Employee) (int32, error) {
+	v, err := t.q.UpdatePhoto(ctx, sqlc.UpdatePhotoParams{ID: e.ID, PhotoPath: e.PhotoPath, Version: e.Version})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, entity.ErrConflict
+	}
+	if err != nil {
+		return 0, database.MapError(err)
+	}
+	return v, nil
+}
+
 func (t *txRepository) BumpVersion(ctx context.Context, e entity.Employee) (int32, error) {
 	v, err := t.q.BumpVersion(ctx, sqlc.BumpVersionParams{ID: e.ID, Version: e.Version})
 	if errors.Is(err, pgx.ErrNoRows) {

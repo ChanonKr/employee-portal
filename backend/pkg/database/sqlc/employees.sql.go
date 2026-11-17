@@ -114,3 +114,22 @@ func (q *Queries) UpdateContactField(ctx context.Context, arg UpdateContactField
 	err := row.Scan(&version)
 	return version, err
 }
+
+const updatePhoto = `-- name: UpdatePhoto :one
+UPDATE employees SET photo_path = $2, version = version + 1, updated_at = now()
+WHERE id = $1 AND version = $3
+RETURNING version
+`
+
+type UpdatePhotoParams struct {
+	ID        int64
+	PhotoPath *string
+	Version   int32
+}
+
+func (q *Queries) UpdatePhoto(ctx context.Context, arg UpdatePhotoParams) (int32, error) {
+	row := q.db.QueryRow(ctx, updatePhoto, arg.ID, arg.PhotoPath, arg.Version)
+	var version int32
+	err := row.Scan(&version)
+	return version, err
+}

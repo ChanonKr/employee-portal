@@ -3,6 +3,9 @@ package profile
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,6 +77,44 @@ func (t *fakeTx) BumpVersion(_ context.Context, e entity.Employee) (int32, error
 	return t.emp.Version, nil
 }
 
+func (t *fakeTx) SavePhoto(_ context.Context, e entity.Employee) (int32, error) {
+	if t.repo.failSave != nil {
+		return 0, t.repo.failSave
+	}
+	e.Version++
+	t.emp = e
+	return e.Version, nil
+}
+
+// fakePhotos accepts any input except the literal "bad".
+type fakePhotos struct{}
+
+func (fakePhotos) Normalize(r io.Reader) ([]byte, error) {
+	b, _ := io.ReadAll(r)
+	if string(b) == "bad" {
+		return nil, entity.ErrPhotoFormat
+	}
+	return []byte("jpeg"), nil
+}
+
+// fakeFiles records which files exist.
+type fakeFiles struct {
+	n     int
+	files map[string]bool
+}
+
+func (f *fakeFiles) Save(context.Context, []byte, string) (string, error) {
+	f.n++
+	name := fmt.Sprintf("new-%d.jpg", f.n)
+	f.files[name] = true
+	return name, nil
+}
+
+func (f *fakeFiles) Delete(_ context.Context, name string) error {
+	delete(f.files, name)
+	return nil
+}
+
 func contains(ids []int64, id int64) bool {
 	for _, x := range ids {
 		if x == id {
@@ -129,7 +170,7 @@ func TestUpdateContact(t *testing.T) {
 
 	t.Run("updates, bumps version and logs one change", func(t *testing.T) {
 		repo := newRepo()
-		v, err := NewUsecase(repo).UpdateContact(ctx, UpdateContactInput{
+		v, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "mobile", Value: "081-234-5678", Version: 3,
 		})
 		require.NoError(t, err)
@@ -141,7 +182,7 @@ func TestUpdateContact(t *testing.T) {
 
 	t.Run("same value bumps version without a log", func(t *testing.T) {
 		repo := newRepo()
-		v, err := NewUsecase(repo).UpdateContact(ctx, UpdateContactInput{
+		v, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "mobile", Value: "0811111111", Version: 3,
 		})
 		require.NoError(t, err)
@@ -151,7 +192,7 @@ func TestUpdateContact(t *testing.T) {
 
 	t.Run("stale version returns conflict and changes nothing", func(t *testing.T) {
 		repo := newRepo()
-		_, err := NewUsecase(repo).UpdateContact(ctx, UpdateContactInput{
+		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "mobile", Value: "0812345678", Version: 2,
 		})
 		assert.ErrorIs(t, err, entity.ErrConflict)
@@ -161,7 +202,7 @@ func TestUpdateContact(t *testing.T) {
 
 	t.Run("unknown field is a validation error before any DB work", func(t *testing.T) {
 		repo := newRepo()
-		_, err := NewUsecase(repo).UpdateContact(ctx, UpdateContactInput{
+		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "first_name", Value: "Hacker", Version: 3,
 		})
 		assert.ErrorIs(t, err, entity.ErrValidation)
@@ -171,7 +212,7 @@ func TestUpdateContact(t *testing.T) {
 	t.Run("failed log insert rolls back the update", func(t *testing.T) {
 		repo := newRepo()
 		repo.failLog = errors.New("insert failed")
-		_, err := NewUsecase(repo).UpdateContact(ctx, UpdateContactInput{
+		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "mobile", Value: "0812345678", Version: 3,
 		})
 		assert.Error(t, err)
@@ -181,7 +222,7 @@ func TestUpdateContact(t *testing.T) {
 
 	t.Run("missing employee is not found", func(t *testing.T) {
 		repo := newRepo()
-		_, err := NewUsecase(repo).UpdateContact(ctx, UpdateContactInput{
+		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: entity.Actor{UserID: 2, EmployeeID: 99}, Field: "email", Value: "a@example.com", Version: 1,
 		})
 		assert.ErrorIs(t, err, entity.ErrNotFound)
@@ -191,7 +232,7 @@ func TestUpdateContact(t *testing.T) {
 func TestSetSkills(t *testing.T) {
 	ctx := context.Background()
 	set := func(repo *fakeRepo, ids []int64, version int32) (int32, error) {
-		return NewUsecase(repo).SetSkills(ctx, SetSkillsInput{Actor: actor, SkillIDs: ids, Version: version})
+		return NewUsecase(Deps{Repo: repo}).SetSkills(ctx, SetSkillsInput{Actor: actor, SkillIDs: ids, Version: version})
 	}
 
 	t.Run("replaces the set, bumps version and logs names", func(t *testing.T) {
@@ -252,6 +293,65 @@ func TestSetSkills(t *testing.T) {
 		repo := newRepo()
 		_, err := set(repo, []int64{1, 1}, 3)
 		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.False(t, repo.committed)
+	})
+}
+
+func TestUpdatePhoto(t *testing.T) {
+	ctx := context.Background()
+	setup := func(oldPhoto *string) (*fakeRepo, *fakeFiles, Usecase) {
+		repo := newRepo()
+		repo.emp.PhotoPath = oldPhoto
+		files := &fakeFiles{files: map[string]bool{}}
+		if oldPhoto != nil {
+			files.files[*oldPhoto] = true
+		}
+		return repo, files, NewUsecase(Deps{Repo: repo, Photos: fakePhotos{}, Files: files})
+	}
+	upload := func(uc Usecase, body string, version int32) (int32, string, error) {
+		return uc.UpdatePhoto(ctx, UpdatePhotoInput{Actor: actor, File: strings.NewReader(body), Version: version})
+	}
+
+	t.Run("saves new file, logs, deletes the replaced file", func(t *testing.T) {
+		repo, files, uc := setup(ptr("old.jpg"))
+		v, name, err := upload(uc, "png", 3)
+		require.NoError(t, err)
+		assert.EqualValues(t, 4, v)
+		assert.Equal(t, "new-1.jpg", name)
+		assert.Equal(t, "new-1.jpg", *repo.emp.PhotoPath)
+		assert.Equal(t, map[string]bool{"new-1.jpg": true}, files.files)
+		require.Len(t, repo.logs, 1)
+		assert.Equal(t, entity.Change{Field: entity.FieldPhoto, Old: "old.jpg", New: "new-1.jpg"}, repo.logs[0])
+	})
+
+	t.Run("first photo has nil old value", func(t *testing.T) {
+		repo, _, uc := setup(nil)
+		_, _, err := upload(uc, "png", 3)
+		require.NoError(t, err)
+		assert.Nil(t, repo.logs[0].Old)
+	})
+
+	t.Run("stale version deletes the new file and keeps the old one", func(t *testing.T) {
+		repo, files, uc := setup(ptr("old.jpg"))
+		_, _, err := upload(uc, "png", 2)
+		assert.ErrorIs(t, err, entity.ErrConflict)
+		assert.Equal(t, map[string]bool{"old.jpg": true}, files.files, "no orphan file")
+		assert.Equal(t, "old.jpg", *repo.emp.PhotoPath)
+	})
+
+	t.Run("failed log insert deletes the new file", func(t *testing.T) {
+		repo, files, uc := setup(ptr("old.jpg"))
+		repo.failLog = errors.New("insert failed")
+		_, _, err := upload(uc, "png", 3)
+		assert.Error(t, err)
+		assert.Equal(t, map[string]bool{"old.jpg": true}, files.files)
+	})
+
+	t.Run("invalid image never reaches storage or the DB", func(t *testing.T) {
+		repo, files, uc := setup(nil)
+		_, _, err := upload(uc, "bad", 3)
+		assert.ErrorIs(t, err, entity.ErrPhotoFormat)
+		assert.Zero(t, files.n)
 		assert.False(t, repo.committed)
 	})
 }

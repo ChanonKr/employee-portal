@@ -8,16 +8,23 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"employee-portal/modules/auth"
+	"employee-portal/modules/file"
 	"employee-portal/modules/history"
 	"employee-portal/modules/profile"
 	"employee-portal/modules/skill"
+	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/middleware"
 )
+
+// multipartOverhead leaves room for multipart headers around the file itself.
+const multipartOverhead = 64 << 10
 
 // routes wires each module: repository → usecase → handler → route group.
 // This is the only place that knows about every layer.
 func (s *Server) routes() {
-	api := s.engine.Group("/api/v1")
+	// JSON endpoints get a small body limit. The photo upload is registered on its
+	// own group below with a limit sized for the file.
+	api := s.engine.Group("/api/v1", middleware.BodyLimit(jsonBodyLimit))
 	api.GET("/healthz", s.health)
 
 	requireAuth := middleware.Auth(s.tokens)
@@ -35,13 +42,29 @@ func (s *Server) routes() {
 	a.GET("/me", requireAuth, authH.Me)
 
 	// ── profile (employee id always comes from the token; the URL has no id)
-	profileH := profile.NewHandler(profile.NewUsecase(profile.NewRepository(s.pool)))
+	profileH := profile.NewHandler(profile.NewUsecase(profile.Deps{
+		Repo:   profile.NewRepository(s.pool),
+		Photos: imaging.NewProcessor(s.cfg.UploadMaxBytes),
+		Files:  s.files,
+		Log:    s.log,
+	}))
 
 	p := api.Group("/profile", requireAuth, middleware.RequireProfile())
 	p.GET("", profileH.GetProfile)
 	p.PUT("/contact/:field", profileH.UpdateContact)
 	p.PUT("/skills", profileH.SetSkills)
 	// No route changes the name: F2 is enforced by the server, not only the UI.
+
+	uploadLimiter := middleware.NewKeyedLimiter(10, time.Minute)
+	upload := s.engine.Group("/api/v1/profile",
+		middleware.BodyLimit(s.cfg.UploadMaxBytes+multipartOverhead),
+		requireAuth, middleware.RequireProfile(),
+		middleware.RateLimit(uploadLimiter, middleware.ByUser))
+	upload.PUT("/photo", profileH.UpdatePhoto)
+
+	// ── files
+	fileH := file.NewHandler(s.files)
+	api.GET("/files/photos/:name", requireAuth, fileH.Photo)
 
 	// ── history (read-only; writes happen inside the profile transactions)
 	historyH := history.NewHandler(history.NewUsecase(history.NewRepository(s.pool), s.cfg.HistoryDays))

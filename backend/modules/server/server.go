@@ -16,6 +16,7 @@ import (
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 	"employee-portal/pkg/security"
+	"employee-portal/pkg/storage"
 )
 
 const (
@@ -28,6 +29,7 @@ type Server struct {
 	log    *slog.Logger
 	pool   *pgxpool.Pool
 	tokens *security.TokenManager
+	files  *storage.Local
 	engine *gin.Engine
 }
 
@@ -55,7 +57,6 @@ func New(cfg configs.Config, log *slog.Logger, pool *pgxpool.Pool) (*Server, err
 			MaxAge:           12 * time.Hour,
 		}),
 		middleware.Timeout(requestTimeout),
-		middleware.BodyLimit(jsonBodyLimit),
 	)
 	engine.NoRoute(func(c *gin.Context) {
 		httputil.Abort(c, http.StatusNotFound, "NOT_FOUND", "Not found.")
@@ -64,11 +65,17 @@ func New(cfg configs.Config, log *slog.Logger, pool *pgxpool.Pool) (*Server, err
 		httputil.Abort(c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed.")
 	})
 
+	files, err := storage.NewLocal(cfg.UploadDir)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Server{
 		cfg:    cfg,
 		log:    log,
 		pool:   pool,
 		tokens: security.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL),
+		files:  files,
 		engine: engine,
 	}
 	s.routes()

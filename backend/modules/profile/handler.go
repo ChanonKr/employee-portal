@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"errors"
 	"net/http"
 	"path"
 
@@ -91,6 +92,43 @@ func (h *Handler) UpdateContact(c *gin.Context) {
 	}
 	c.Header("ETag", httputil.ETag(v))
 	c.JSON(http.StatusOK, versionResponse{Version: v})
+}
+
+type photoResponse struct {
+	Version  int32  `json:"version"`
+	PhotoURL string `json:"photoUrl"`
+}
+
+// UpdatePhoto: PUT /profile/photo  multipart field "file". The route sets the body limit.
+func (h *Handler) UpdatePhoto(c *gin.Context) {
+	version, err := httputil.IfMatchVersion(c)
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			httputil.WriteError(c, entity.ErrPhotoTooLarge)
+			return
+		}
+		httputil.WriteError(c, entity.NewValidationError("file", "is required"))
+		return
+	}
+	defer file.Close()
+
+	v, name, err := h.uc.UpdatePhoto(c.Request.Context(), UpdatePhotoInput{
+		Actor:   middleware.ActorFrom(c),
+		File:    file,
+		Version: version,
+	})
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	c.Header("ETag", httputil.ETag(v))
+	c.JSON(http.StatusOK, photoResponse{Version: v, PhotoURL: photoURLPrefix + name})
 }
 
 // SetSkills: PUT /profile/skills  body {skillIds: number[]}

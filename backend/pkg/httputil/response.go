@@ -57,6 +57,10 @@ func classify(err error) (int, ErrorBody) {
 		return http.StatusForbidden, ErrorBody{Code: "FORBIDDEN", Message: "You do not have access to this resource."}
 	case errors.Is(err, entity.ErrNotFound):
 		return http.StatusNotFound, ErrorBody{Code: "NOT_FOUND", Message: "Not found."}
+	case errors.Is(err, entity.ErrPhotoTooLarge):
+		return http.StatusRequestEntityTooLarge, ErrorBody{Code: "PAYLOAD_TOO_LARGE", Message: "Photo must be at most 5 MB."}
+	case errors.Is(err, entity.ErrPhotoFormat):
+		return http.StatusUnsupportedMediaType, ErrorBody{Code: "UNSUPPORTED_MEDIA_TYPE", Message: "Photo must be a JPEG, PNG or WebP image."}
 	case errors.Is(err, entity.ErrConflict):
 		return http.StatusConflict, ErrorBody{Code: "VERSION_CONFLICT", Message: "Profile was updated elsewhere. Please reload."}
 	default:

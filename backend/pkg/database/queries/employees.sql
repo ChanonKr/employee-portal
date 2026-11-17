@@ -21,6 +21,11 @@ UPDATE employees SET
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(version)
 RETURNING version;
 
+-- name: UpdatePhoto :one
+UPDATE employees SET photo_path = $2, version = version + 1, updated_at = now()
+WHERE id = $1 AND version = $3
+RETURNING version;
+
 -- name: BumpVersion :one
 -- For edits stored outside the employees row (skills), so ETag/If-Match still work.
 UPDATE employees SET version = version + 1, updated_at = now()
