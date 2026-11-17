@@ -93,8 +93,9 @@ employee-portal/
 │   │   │   ├── errors.go               # ErrNotFound, ErrConflict, ErrForbidden, ErrUnauthorized, ValidationError
 │   │   │   └── *_test.go
 │   │   ├── auth/                       # handler.go · usecase.go · usecase_test.go · repository.go
-│   │   ├── profile/                    # handler.go · usecase.go · usecase_test.go · repository.go
-│   │   ├── skill/ · history/ · file/ · admin/     # (ขั้นถัดไป) โครงเดียวกัน
+│   │   ├── profile/                    # handler.go · usecase.go · usecase_test.go · repository.go (รวม PUT /profile/skills)
+│   │   ├── skill/                      # GET /skills (catalog สำหรับ picker)
+│   │   ├── history/ · file/ · admin/   # (ขั้นถัดไป) โครงเดียวกัน
 │   ├── pkg/
 │   │   ├── database/
 │   │   │   ├── postgres.go             # pgxpool + ping
@@ -122,7 +123,6 @@ employee-portal/
 │   │   ├── components/ui/
 │   │   └── lib/
 │   └── Dockerfile
-├── config/skills.yaml                  # รายการ skill เริ่มต้น
 ├── docs/                               # DESIGN.md, screenshots
 ├── docker-compose.yml
 ├── Makefile                            # up, down, migrate, sqlc, seed, test, lint
@@ -217,9 +217,9 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 | `GetSetting` / `UpsertSetting` | `:one` / `:exec` | F6, Admin |
 | `GetProfile` | `:one` | F1 |
 | `GetProfileForUpdate` | `:one` (`FOR UPDATE`) | อ่านค่าเดิม + lock แถวก่อนแก้ |
-| `ListEmployeeSkills` | `:many` | F1 |
-| `ListActiveSkills` | `:many` | F5 |
-| `CountActiveSkillsIn` | `:one` | ตรวจ skill id ที่ส่งมา |
+| `ListEmployeeSkills` | `:many` | F1, F5 (ชุดเดิม) |
+| `ListActiveSkills` | `:many` | F5 (picker) |
+| `GetSkillsByIDs` | `:many` | F5 — คืนทั้ง active/inactive เพื่อแยก "ไม่มีจริง" กับ "ถูกปิด" |
 | `UpdateContactField` | `:one` (`RETURNING version`) | F4 |
 | `UpdatePhoto` | `:one` | F3 |
 | `BumpVersion` | `:one` | F5 (skills ไม่ได้อยู่ในตาราง employees) |
@@ -311,7 +311,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 - `repository.go` แปลง sqlc row ↔ entity, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น entity error ผ่าน `database.MapError`
 - ตรวจ version หลัง `FOR UPDATE` → แยก 404 (ไม่มีแถว) กับ 409 (version ไม่ตรง) ได้ชัด
 - Unit test ของ use case ใช้ fake repository (in-memory) ส่วน transaction, lock และ rollback จริงทดสอบใน `tests/integration`
-- `SetSkills`: ตรวจ `CountActiveSkillsIn(ids) == len(ids)` → lock → อ่านชื่อเดิม → delete + insert → `BumpVersion` → ถ้าชุดชื่อต่างจากเดิม insert log (`["Go","React"]` → `["Go","Flutter"]`)
+- `SetSkills`: ลำดับเดียวกัน แต่ใช้ `ReplaceSkills` + `BumpVersion` แทน `SaveContact` (รายละเอียด §8)
 
 ### 5.5 Error Mapping (pg → domain → HTTP)
 | PostgreSQL | ความหมาย | Domain error | HTTP |
@@ -411,7 +411,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | address | trim, 1–500 ตัวอักษร (นับเป็น rune — ภาษาไทยนับถูก) |
 | contact ทุก field | กรอกค่าได้แต่ล้างเป็นค่าว่างไม่ได้ (ตั้งใจ — ลดความกำกวมของ "ลบ" กับ "ไม่ส่ง") |
 | photo | ≤ 5 MB, magic bytes = jpeg/png/webp, decode ได้, resize ≤ 512×512 → JPEG q85 |
-| skillIds | ไม่ซ้ำ, ≤ 20 รายการ, ทุก id ต้องมีอยู่และ active (ตรวจกับ DB) |
+| skillIds | ต้องส่ง (`[]` = ล้างทั้งหมด), ไม่ซ้ำ, ≤ 20 รายการ, ทุก id ต้องมีอยู่ และต้อง active **ยกเว้น**ตัวที่พนักงานมีอยู่แล้ว (ตรวจกับ DB) |
 
 DB มี `CHECK` constraint เป็นชั้นที่สอง กันข้อมูลเสียจากทุกช่องทาง
 
@@ -554,21 +554,28 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app;
 
 ## 8. Configurable Skills
 - **Source of truth:** ตาราง `skills`
-- ค่าเริ่มต้นจาก `config/skills.yaml` → `make seed-skills` (upsert ตามชื่อ, ตัวที่ไม่อยู่ในไฟล์ → `is_active = FALSE` ไม่ลบ เพื่อไม่ให้ข้อมูลเก่าพัง)
-- หลังจากนั้นจัดการผ่านหน้า **Admin → Skills** (เพิ่ม, แก้ชื่อ, เปิด/ปิด, จัดลำดับ)
+- ค่าเริ่มต้นอยู่ใน **migration** `000003_seed_demo.up.sql` (ไม่มีไฟล์ config แยก) → `docker compose up` ครั้งเดียวได้ catalog พร้อมใช้
+- เปลี่ยน catalog ภายหลัง: เพิ่ม migration ใหม่ (ห้ามแก้ไฟล์ที่ apply ไปแล้ว) หรือจัดการผ่านหน้า **Admin → Skills** (เพิ่ม, แก้ชื่อ, เปิด/ปิด, จัดลำดับ)
+- **ไม่ลบ skill** — ปิดด้วย `is_active = FALSE`: หายจาก picker (`GET /skills`) แต่พนักงานที่มีอยู่แล้วยังเก็บไว้ได้ และ history ยังอ่านได้
 
-```yaml
-# config/skills.yaml
-skills:
-  - Go
-  - React
-  - Flutter
-  - CI/CD
-  - Docker
-  - Kubernetes
-  - PostgreSQL
-  - TypeScript
+```sql
+-- 000003_seed_demo.up.sql
+INSERT INTO skills (name, sort_order) VALUES
+  ('Go', 1), ('React', 2), ('Flutter', 3), ('CI/CD', 4),
+  ('Docker', 5), ('Kubernetes', 6), ('PostgreSQL', 7), ('TypeScript', 8);
 ```
+
+**`PUT /profile/skills` (แทนทั้งชุดใน request เดียว)** — `profile.SetSkills` ใน 1 transaction:
+```
+ValidateSkillIDs (≤ 20, ไม่ซ้ำ, > 0 — ก่อนเปิด tx)
+→ GetForUpdate (lock) → CheckVersion
+→ ListEmployeeSkills (ชุดเดิม) + GetSkillsByIDs (ชุดใหม่ รวม inactive)
+→ CheckSkillSelection: ทุก id ต้องมีจริง · inactive ได้เฉพาะตัวที่พนักงานมีอยู่แล้ว
+→ ReplaceSkills (delete + insert) → BumpVersion
+→ SkillsChange: ถ้าชุดต่างจากเดิม (ไม่สนลำดับ) log ชื่อ ["Go","Flutter"] → ["Go","React"]
+```
+- `[]` = ล้างทุก skill (ได้) · ไม่ส่ง `skillIds` = 400
+- กฎทั้งหมดอยู่ใน `entity/skill.go` ทดสอบแบบไม่ต้องมี DB
 
 ---
 
@@ -734,7 +741,8 @@ Layout: navbar มี badge **Admin** + sidebar (Dashboard, Employees, Skills, S
 - 2 request พร้อมกันด้วย version เดียวกัน → สำเร็จ 1, ได้ 409 อีก 1 (ทดสอบ `FOR UPDATE`)
 - insert log ล้มเหลว → update ถูก rollback ด้วย (ไม่มีข้อมูลเปลี่ยนโดยไม่มี log)
 - field ไม่รู้จัก → 400
-- skills มี id ที่ inactive → 400, ไม่มีอะไรเปลี่ยน
+- skills มี id ที่ inactive ซึ่งพนักงานยังไม่มี → 400, ไม่มีอะไรเปลี่ยน · ถ้ามีอยู่แล้ว → เก็บไว้ได้
+- skills ชุดเดิมแต่สลับลำดับ → version +1 แต่ไม่มี log · insert log ล้มเหลว → skills ถูก rollback
 - history: log อายุ 8 วันไม่แสดงเมื่อ `history_days=7` แต่แสดงเมื่อ `=10` และ `hasOlder` ถูกต้อง
 - employee เรียก `/admin/*` → 403 · เรียก `AdminService` ด้วย actor ที่ไม่ใช่ admin → `ErrForbidden`
 - admin แก้ชื่อ → log `first_name`/`last_name` ระบุ `changed_by` = admin
