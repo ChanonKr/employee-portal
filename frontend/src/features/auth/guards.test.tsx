@@ -57,3 +57,27 @@ describe('sign-in flow with real guards', () => {
     expect(screen.queryByText('Admin')).not.toBeInTheDocument()
   })
 })
+
+describe('admin home', () => {
+  it('sends admins to /admin after signing in, not to a profile', async () => {
+    mockFetch((url) => (url.endsWith('/auth/me') ? { status: 200, body: me } : undefined))
+    renderRoute(<RedirectIfSignedIn><p>Login</p></RedirectIfSignedIn>, {
+      path: '/login',
+      extra: [
+        { path: '/admin', element: <p>Admin home</p> },
+        { path: '/profile', element: <p>Profile</p> },
+      ],
+    })
+    expect(await screen.findByText('Admin home')).toBeInTheDocument()
+  })
+
+  it('keeps admins out of the employee profile page', async () => {
+    mockFetch((url) => (url.endsWith('/auth/me') ? { status: 200, body: me } : undefined))
+    renderRoute(<RequireAuth><RequireRole role="employee"><p>Profile</p></RequireRole></RequireAuth>, {
+      path: '/profile',
+      extra: [{ path: '/admin', element: <p>Admin home</p> }],
+    })
+    expect(await screen.findByText('Admin home')).toBeInTheDocument()
+    expect(screen.queryByText('Profile')).not.toBeInTheDocument()
+  })
+})

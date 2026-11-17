@@ -56,3 +56,14 @@ test('employees cannot open admin pages', async ({ signedIn: page }) => {
   const res = await page.request.get('/api/v1/admin/settings')
   expect(res.status()).toBe(403)
 })
+
+test('admins land on the admin dashboard and have no Profile menu', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByLabel('Employee code').fill('ADMIN-001')
+  await page.getByLabel('Password', { exact: true }).fill('demo1234')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL((u) => u.pathname === '/admin')
+  await expect(page.getByRole('link', { name: 'Profile' })).toHaveCount(0)
+  await page.goto('/profile')
+  await page.waitForURL((u) => u.pathname === '/admin')
+})

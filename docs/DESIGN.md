@@ -627,17 +627,17 @@ export default defineConfig({
 ### 9.2 Routes & Navigation
 | Path | หน้า | Guard |
 |---|---|---|
-| `/login` | Login | public (ถ้า login แล้ว → `/profile`) |
+| `/login` | Login | public (ถ้า login แล้ว → หน้าแรกตาม role: employee `/profile`, admin `/admin`) |
 | `/change-password` | บังคับเปลี่ยนรหัส *(X5)* | auth |
-| `/profile` | My Profile — **หน้าหลัก** | auth |
-| `/history` | Change History (เต็ม) | auth |
+| `/profile` | My Profile — **หน้าหลักของ employee** | employee (admin → `/admin`) |
+| `/history` | Change History (เต็ม) | employee (admin → `/admin`) |
 | `/admin` | Dashboard | admin |
 | `/admin/skills` | จัดการ Skills | admin |
 | `/admin/settings` | ตั้งค่า | admin |
 | `/admin/employees` | รายชื่อพนักงาน | admin |
 | `/admin/employees/:id` | รายละเอียด + แก้ชื่อ + history | admin |
 
-**Navbar:** `Profile` · `Admin` (เฉพาะ admin) · Logout
+**Navbar:** employee เห็น `Profile` · admin เห็น `Admin` อย่างเดียว (admin ไม่มีโปรไฟล์ของตัวเองให้แก้ — ดู/แก้ของพนักงานผ่าน `/admin/employees`) · Logout
 - **ไม่มีเมนู History บน navbar** — เข้า `/history` ผ่านลิงก์ "View all" ในการ์ด Recent changes เท่านั้น (pattern สรุป → รายละเอียด, history เป็นส่วนหนึ่งของโปรไฟล์)
 - มือถือ: เมนูน้อยจนไม่ต้องใช้ hamburger (ทั้ง employee และ admin) · เมนูย่อยของ admin เป็นแถบเลื่อนแนวนอนแทน Sheet (กดน้อยกว่า 1 ครั้ง, ไม่ซ่อนเมนู)
 - เปลี่ยนรหัส: ไอคอนกุญแจบน navbar → `/change-password` · บัญชีที่ใช้รหัสชั่วคราวถูกพาไปหน้านี้ก่อนทุกหน้า
@@ -646,7 +646,7 @@ export default defineConfig({
 ```
 เปิด URL ใดก็ได้
   → GET /api/v1/auth/me  (ระหว่างรอ: full-page spinner สั้น ๆ)
-     ├─ 401 → /login?next=<path>   → login สำเร็จ → กลับ <path> (default /profile)
+     ├─ 401 → /login?next=<path>   → login สำเร็จ → กลับ <path> (default: employee /profile, admin /admin)
      ├─ mustChangePassword → /change-password   (X5)
      └─ ok  → render route  (<RequireAuth>, <RequireRole role="admin">)
 
@@ -746,7 +746,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 |---|---|---|
 | `EMP-00001` | โปรไฟล์ครบ + history หลายวัน (บางรายการเก่ากว่า 7 วัน) | หน้าปกติ, history ถูกตัดตาม `days` |
 | `EMP-00002` | โปรไฟล์ว่าง | empty state + checklist |
-| `ADMIN-001` | role admin | หน้า Admin |
+| `ADMIN-001` | role admin | หน้า Admin (login แล้วไป `/admin`, ไม่มีเมนู Profile) |
 
 รหัสผ่าน demo อยู่ใน seed file + README (ไม่แสดงบนหน้าจอ) · ข้อมูล seed เป็นข้อมูลสมมติทั้งหมด (ดู §14)
 

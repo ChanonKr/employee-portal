@@ -25,7 +25,7 @@ stop the `web` container first, or Vite picks the next free port).
 |-------------|------------|------------------------------------------------------------|
 | `EMP-00001` | `demo1234` | Complete profile; history inside and outside the 7-day window |
 | `EMP-00002` | `demo1234` | Empty profile (first-time experience)                      |
-| `ADMIN-001` | `demo1234` | Admin role                                                 |
+| `ADMIN-001` | `demo1234` | Admin role: lands on `/admin`, no Profile menu             |
 
 Demo data is fictional and lives in migration `000003_seed_demo` (local development only).
 

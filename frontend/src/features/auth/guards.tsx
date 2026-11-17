@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate, useLocation, useSearchParams } from 'react-router'
 import type { Role } from '@/api/types'
 import { FullPageSpinner } from '@/components/ui/spinner'
-import { safeNext, useMe } from './api'
+import { homeFor, safeNext, useMe } from './api'
 
 /** Signed in → render; otherwise go to /login?next=<current path>. */
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -23,18 +23,25 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 /** UI-level role check. The API enforces it too; this only hides what cannot be used. */
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { data: me } = useMe()
-  if (me?.role !== role) return <Navigate to="/profile" replace />
+  if (me?.role !== role) return <Navigate to={homeFor(me?.role)} replace />
   return <>{children}</>
 }
 
 /**
- * On /login: once signed in, continue to ?next (or /profile). This also handles the
+ * On /login: once signed in, continue to ?next (or the role's home page). This also handles the
  * moment right after a successful sign-in, when the refreshed session arrives.
  */
 export function RedirectIfSignedIn({ children }: { children: ReactNode }) {
   const { data: me, isPending } = useMe()
   const [params] = useSearchParams()
   if (isPending) return <FullPageSpinner />
-  if (me) return <Navigate to={safeNext(params.get('next'))} replace />
+  if (me) return <Navigate to={safeNext(params.get('next'), homeFor(me.role))} replace />
   return <>{children}</>
+}
+
+/** Unknown paths go to the signed-in user's home page. */
+export function HomeRedirect() {
+  const { data: me, isPending } = useMe()
+  if (isPending) return <FullPageSpinner />
+  return <Navigate to={homeFor(me?.role)} replace />
 }

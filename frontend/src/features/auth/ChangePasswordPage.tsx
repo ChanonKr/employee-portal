@@ -9,7 +9,7 @@ import { ErrorAlert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { useChangePassword, useLogout, useMe } from './api'
+import { homeFor, useChangePassword, useLogout, useMe } from './api'
 
 // Mirrors the server policy so most mistakes are caught before submitting.
 const schema = z
@@ -46,7 +46,7 @@ export function ChangePasswordPage() {
       {
         onSuccess: () => {
           toast.success('Password updated')
-          navigate('/profile', { replace: true })
+          navigate(homeFor(me?.role), { replace: true })
         },
         onError: (e) => {
           if (isApiError(e, 'VALIDATION_ERROR') && e.fields) {

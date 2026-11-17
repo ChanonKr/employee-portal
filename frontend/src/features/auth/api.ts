@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, isApiError } from '@/api/client'
-import type { Me } from '@/api/types'
+import type { Me, Role } from '@/api/types'
 
 export const meKey = ['me'] as const
 
@@ -47,7 +47,12 @@ export function useChangePassword() {
 }
 
 /** Only allow same-app paths as ?next= targets (no open redirects). */
-export function safeNext(next: string | null): string {
-  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/profile'
+/** Where each role lands: admins have no profile page of their own. */
+export function homeFor(role: Role | undefined): string {
+  return role === 'admin' ? '/admin' : '/profile'
+}
+
+export function safeNext(next: string | null, fallback = '/profile'): string {
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return fallback
   return next
 }

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router'
+import { Route, Routes } from 'react-router'
 import { AppShell } from '@/components/AppShell'
 import { AdminLayout } from '@/features/admin/AdminLayout'
 import { DashboardPage } from '@/features/admin/DashboardPage'
@@ -8,7 +8,7 @@ import { SettingsPage } from '@/features/admin/SettingsPage'
 import { SkillsAdminPage } from '@/features/admin/SkillsAdminPage'
 import { SessionWatcher } from '@/components/SessionWatcher'
 import { ChangePasswordPage } from '@/features/auth/ChangePasswordPage'
-import { RedirectIfSignedIn, RequireAuth, RequireRole } from '@/features/auth/guards'
+import { HomeRedirect, RedirectIfSignedIn, RequireAuth, RequireRole } from '@/features/auth/guards'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { HistoryPage } from '@/features/history/HistoryPage'
 import { ProfilePage } from '@/features/profile/ProfilePage'
@@ -41,8 +41,23 @@ export function App() {
             </RequireAuth>
           }
         >
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/history" element={<HistoryPage />} />
+          {/* Admins have no profile of their own; they manage everyone else's under /admin. */}
+          <Route
+            path="/profile"
+            element={
+              <RequireRole role="employee">
+                <ProfilePage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <RequireRole role="employee">
+                <HistoryPage />
+              </RequireRole>
+            }
+          />
           <Route
             path="/admin"
             element={
@@ -58,7 +73,14 @@ export function App() {
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Route>
-        <Route path="*" element={<Navigate to="/profile" replace />} />
+        <Route
+          path="*"
+          element={
+            <RequireAuth>
+              <HomeRedirect />
+            </RequireAuth>
+          }
+        />
       </Routes>
     </>
   )
