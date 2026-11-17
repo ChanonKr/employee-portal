@@ -47,7 +47,7 @@ func TestSetSkills_ReplacesSetAndLogsNames(t *testing.T) {
 	userID, empID, _ := newEmployee(t, "0811111111")
 	a, aName := newSkill(t, true)
 	b, bName := newSkill(t, true)
-	uc := profile.NewUsecase(profile.NewRepository(appPool))
+	uc := newProfileUsecase(t)
 	actor := entity.Actor{UserID: userID, EmployeeID: empID}
 
 	v, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{a, b}, Version: 1})
@@ -79,7 +79,7 @@ func TestSetSkills_InactiveSkill(t *testing.T) {
 	userID, empID, _ := newEmployee(t, "0811111111")
 	active, _ := newSkill(t, true)
 	retired, _ := newSkill(t, false)
-	uc := profile.NewUsecase(profile.NewRepository(appPool))
+	uc := newProfileUsecase(t)
 	actor := entity.Actor{UserID: userID, EmployeeID: empID}
 
 	// Cannot newly pick a retired skill.
@@ -106,7 +106,7 @@ func TestSetSkills_LogFailureRollsBackSkills(t *testing.T) {
 	ctx := context.Background()
 	_, empID, _ := newEmployee(t, "0811111111")
 	a, _ := newSkill(t, true)
-	uc := profile.NewUsecase(profile.NewRepository(appPool))
+	uc := newProfileUsecase(t)
 
 	ghost := entity.Actor{UserID: 999_999_999, EmployeeID: empID} // log insert fails (FK)
 	_, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: ghost, SkillIDs: []int64{a}, Version: 1})

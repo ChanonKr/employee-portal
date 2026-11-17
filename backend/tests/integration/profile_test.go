@@ -17,7 +17,7 @@ import (
 func TestUpdateContact_WritesValueAndLogTogether(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
-	uc := profile.NewUsecase(profile.NewRepository(appPool))
+	uc := newProfileUsecase(t)
 	actor := entity.Actor{UserID: userID, EmployeeID: empID}
 
 	v, err := uc.UpdateContact(ctx, profile.UpdateContactInput{Actor: actor, Field: "mobile", Value: "0812345678", Version: 1})
@@ -41,7 +41,7 @@ func TestUpdateContact_WritesValueAndLogTogether(t *testing.T) {
 func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
-	uc := profile.NewUsecase(profile.NewRepository(appPool))
+	uc := newProfileUsecase(t)
 	actor := entity.Actor{UserID: userID, EmployeeID: empID}
 
 	const n = 5
@@ -78,7 +78,7 @@ func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 func TestUpdateContact_LogFailureRollsBackUpdate(t *testing.T) {
 	ctx := context.Background()
 	_, empID, _ := newEmployee(t, "0811111111")
-	uc := profile.NewUsecase(profile.NewRepository(appPool))
+	uc := newProfileUsecase(t)
 
 	// changed_by references a user that does not exist → the log insert fails (FK).
 	ghost := entity.Actor{UserID: 999_999_999, EmployeeID: empID}

@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +28,7 @@ func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 	srv, err := server.New(configs.Config{
 		JWTSecret: "integration-test-secret-0123456789", JWTTTL: 3600e9, HistoryDays: 7,
 		CORSOrigins: []string{"http://localhost:5173"},
+		UploadDir:   t.TempDir(), UploadMaxBytes: 5 << 20,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), appPool)
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
@@ -174,5 +177,63 @@ func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 	res = do("GET", "/api/v1/profile/history?field=mobile", "", nil, cookies)
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode, "filter uses the stored field name")
 	res = do("GET", "/api/v1/profile/history?page=abc", "", nil, cookies)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+	// ── photo upload (multipart)
+	upload := func(content []byte, version string) *http.Response {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		part, _ := mw.CreateFormFile("file", "me.jpg")
+		_, _ = part.Write(content)
+		_ = mw.Close()
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/profile/photo", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("If-Match", version)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { res.Body.Close() })
+		return res
+	}
+
+	res = upload([]byte("plain text renamed to .jpg"), `"3"`)
+	assert.Equal(t, http.StatusUnsupportedMediaType, res.StatusCode)
+
+	res = upload(bytes.Repeat([]byte{0xFF}, 6<<20), `"3"`)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, res.StatusCode)
+
+	res = upload(testPNG(t, 800, 800), `"3"`)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var photo struct {
+		Version  int32  `json:"version"`
+		PhotoURL string `json:"photoUrl"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&photo))
+	assert.EqualValues(t, 4, photo.Version)
+	assert.Regexp(t, `^/api/v1/files/photos/[0-9a-f-]{36}\.jpg$`, photo.PhotoURL)
+
+	res = do("GET", photo.PhotoURL, "", nil, cookies)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "image/jpeg", res.Header.Get("Content-Type"))
+	assert.Contains(t, res.Header.Get("Cache-Control"), "immutable")
+
+	res = do("GET", photo.PhotoURL, "", nil, nil)
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "photos need a session")
+	res = do("GET", "/api/v1/files/photos/..%2F..%2Fetc%2Fpasswd", "", nil, cookies)
+	assert.Equal(t, http.StatusNotFound, res.StatusCode)
+
+	res = do("GET", "/api/v1/profile", "", nil, cookies)
+	var withPhoto struct {
+		PhotoURL *string `json:"photoUrl"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&withPhoto))
+	require.NotNil(t, withPhoto.PhotoURL)
+	assert.Equal(t, photo.PhotoURL, *withPhoto.PhotoURL)
+
+	// JSON endpoints keep the small body limit even though uploads allow 5 MB.
+	big := `{"value":"` + strings.Repeat("a", 100<<10) + `"}`
+	res = do("PUT", "/api/v1/profile/contact/address", big, map[string]string{"If-Match": `"4"`}, cookies)
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }

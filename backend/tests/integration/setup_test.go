@@ -7,7 +7,9 @@ package integration
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -20,7 +22,10 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"employee-portal/modules/profile"
 	"employee-portal/pkg/database"
+	"employee-portal/pkg/imaging"
+	"employee-portal/pkg/storage"
 )
 
 var (
@@ -114,4 +119,26 @@ func countLogs(t *testing.T, employeeID int64) int {
 		t.Fatalf("count logs: %v", err)
 	}
 	return n
+}
+
+// newProfileUsecase wires the real repository, image processor and local storage
+// (in a temp dir) — the same pieces the server uses.
+func newProfileUsecase(t *testing.T) profile.Usecase {
+	uc, _ := newProfileUsecaseWithDir(t)
+	return uc
+}
+
+func newProfileUsecaseWithDir(t *testing.T) (profile.Usecase, string) {
+	t.Helper()
+	dir := t.TempDir()
+	files, err := storage.NewLocal(dir)
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	return profile.NewUsecase(profile.Deps{
+		Repo:   profile.NewRepository(appPool),
+		Photos: imaging.NewProcessor(5 << 20),
+		Files:  files,
+		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}), dir
 }
