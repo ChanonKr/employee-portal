@@ -30,6 +30,7 @@ type TxRepository interface {
 	BumpVersion(ctx context.Context, e entity.Employee) (newVersion int32, err error)
 
 	SavePhoto(ctx context.Context, e entity.Employee) (newVersion int32, err error)
+	SaveName(ctx context.Context, e entity.Employee) (newVersion int32, err error)
 }
 
 // PhotoProcessor checks an upload and re-encodes it (pkg/imaging).
@@ -62,11 +63,21 @@ type UpdatePhotoInput struct {
 	Version int32 // from If-Match
 }
 
+// UpdateNameInput is the admin-only legal name change.
+type UpdateNameInput struct {
+	Actor      entity.Actor // must be an admin
+	EmployeeID int64        // from the URL
+	FirstName  string
+	LastName   string
+	Version    int32 // from If-Match
+}
+
 type Usecase interface {
 	GetProfile(ctx context.Context, actor entity.Actor) (entity.Profile, error)
 	UpdateContact(ctx context.Context, in UpdateContactInput) (newVersion int32, err error)
 	SetSkills(ctx context.Context, in SetSkillsInput) (newVersion int32, err error)
 	UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (newVersion int32, photoName string, err error)
+	UpdateName(ctx context.Context, in UpdateNameInput) (newVersion int32, err error)
 }
 
 type Deps struct {
@@ -220,4 +231,36 @@ func (u *usecase) deleteFile(ctx context.Context, name, reason string) {
 	if err := u.files.Delete(context.WithoutCancel(ctx), name); err != nil {
 		u.log.WarnContext(ctx, "could not delete photo file", "file", name, "reason", reason, "error", err)
 	}
+}
+
+// UpdateName is the only way to change a name (employees have no route for it).
+// Each changed part is logged separately with the admin as changed_by.
+func (u *usecase) UpdateName(ctx context.Context, in UpdateNameInput) (int32, error) {
+	if err := entity.RequireAdmin(in.Actor); err != nil {
+		return 0, err
+	}
+	var newVersion int32
+	err := u.repo.WithTx(ctx, func(tx TxRepository) error {
+		emp, err := tx.GetForUpdate(ctx, in.EmployeeID)
+		if err != nil {
+			return err
+		}
+		changes, err := emp.ChangeName(in.FirstName, in.LastName, in.Version)
+		if err != nil {
+			return err
+		}
+		if newVersion, err = tx.SaveName(ctx, emp); err != nil {
+			return err
+		}
+		for _, c := range changes {
+			if err := tx.AppendChange(ctx, emp.ID, c, in.Actor); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return newVersion, nil
 }

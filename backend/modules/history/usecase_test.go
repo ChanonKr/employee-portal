@@ -32,6 +32,8 @@ func (f *fakeRepo) List(_ context.Context, q entity.HistoryQuery, limit int) ([]
 
 func (f *fakeRepo) HasOlder(context.Context, int64, int) (bool, error) { return f.hasOlder, nil }
 
+func (f *fakeRepo) EmployeeExists(_ context.Context, id int64) (bool, error) { return id != 404, nil }
+
 func logs(n int) []entity.ChangeLog {
 	out := make([]entity.ChangeLog, n)
 	for i := range out {
@@ -101,4 +103,23 @@ func TestListOwn(t *testing.T) {
 		_, err := NewUsecase(&fakeRepo{days: "7"}, 7).ListOwn(ctx, ListInput{Actor: actor, PageSize: 1000})
 		assert.ErrorIs(t, err, entity.ErrValidation)
 	})
+}
+
+func TestListForEmployee(t *testing.T) {
+	ctx := context.Background()
+	admin := entity.Actor{UserID: 9, Role: entity.RoleAdmin}
+
+	repo := &fakeRepo{days: "7", logs: logs(3), hasOlder: true}
+	res, err := NewUsecase(repo, 7).ListForEmployee(ctx, 55, ListInput{Actor: admin})
+	require.NoError(t, err)
+	assert.True(t, res.AllTime)
+	assert.Zero(t, repo.gotQuery.Days, "no time window")
+	assert.EqualValues(t, 55, repo.gotQuery.EmployeeID, "employee from the URL, not the actor")
+	assert.Len(t, res.Items, 3)
+
+	_, err = NewUsecase(repo, 7).ListForEmployee(ctx, 404, ListInput{Actor: admin})
+	assert.ErrorIs(t, err, entity.ErrNotFound)
+
+	_, err = NewUsecase(repo, 7).ListForEmployee(ctx, 55, ListInput{Actor: actor})
+	assert.ErrorIs(t, err, entity.ErrForbidden)
 }

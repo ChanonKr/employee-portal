@@ -28,6 +28,17 @@ func (q *Queries) BumpVersion(ctx context.Context, arg BumpVersionParams) (int32
 	return version, err
 }
 
+const employeeExists = `-- name: EmployeeExists :one
+SELECT EXISTS (SELECT 1 FROM employees WHERE id = $1)
+`
+
+func (q *Queries) EmployeeExists(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRow(ctx, employeeExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const getProfile = `-- name: GetProfile :one
 SELECT e.id, e.user_id, e.first_name, e.last_name, e.photo_path, e.mobile_phone, e.contact_email, e.address, e.version, e.updated_at, u.employee_code
 FROM employees e
@@ -108,6 +119,31 @@ func (q *Queries) UpdateContactField(ctx context.Context, arg UpdateContactField
 		arg.Field,
 		arg.Value,
 		arg.ID,
+		arg.Version,
+	)
+	var version int32
+	err := row.Scan(&version)
+	return version, err
+}
+
+const updateName = `-- name: UpdateName :one
+UPDATE employees SET first_name = $2, last_name = $3, version = version + 1, updated_at = now()
+WHERE id = $1 AND version = $4
+RETURNING version
+`
+
+type UpdateNameParams struct {
+	ID        int64
+	FirstName string
+	LastName  string
+	Version   int32
+}
+
+func (q *Queries) UpdateName(ctx context.Context, arg UpdateNameParams) (int32, error) {
+	row := q.db.QueryRow(ctx, updateName,
+		arg.ID,
+		arg.FirstName,
+		arg.LastName,
 		arg.Version,
 	)
 	var version int32

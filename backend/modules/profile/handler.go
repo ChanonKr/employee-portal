@@ -3,7 +3,6 @@ package profile
 import (
 	"errors"
 	"net/http"
-	"path"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,8 +10,6 @@ import (
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
-
-const photoURLPrefix = "/api/v1/files/photos/"
 
 type Handler struct {
 	uc Usecase
@@ -128,7 +125,7 @@ func (h *Handler) UpdatePhoto(c *gin.Context) {
 		return
 	}
 	c.Header("ETag", httputil.ETag(v))
-	c.JSON(http.StatusOK, photoResponse{Version: v, PhotoURL: photoURLPrefix + name})
+	c.JSON(http.StatusOK, photoResponse{Version: v, PhotoURL: httputil.PhotoURL(name)})
 }
 
 // SetSkills: PUT /profile/skills  body {skillIds: number[]}
@@ -157,6 +154,39 @@ func (h *Handler) SetSkills(c *gin.Context) {
 	c.JSON(http.StatusOK, versionResponse{Version: v})
 }
 
+type updateNameRequest struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+}
+
+// AdminUpdateName: PUT /admin/employees/:id/name {firstName, lastName} + If-Match
+func (h *Handler) AdminUpdateName(c *gin.Context) {
+	id, ok := httputil.PathID(c, "id")
+	if !ok {
+		return
+	}
+	version, err := httputil.IfMatchVersion(c)
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	var req updateNameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httputil.WriteError(c, entity.NewValidationError("body", "must be JSON with firstName and lastName"))
+		return
+	}
+	v, err := h.uc.UpdateName(c.Request.Context(), UpdateNameInput{
+		Actor: middleware.ActorFrom(c), EmployeeID: id,
+		FirstName: req.FirstName, LastName: req.LastName, Version: version,
+	})
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	c.Header("ETag", httputil.ETag(v))
+	c.JSON(http.StatusOK, versionResponse{Version: v})
+}
+
 func toProfileResponse(p entity.Profile) profileResponse {
 	res := profileResponse{
 		ID:           p.ID,
@@ -167,10 +197,7 @@ func toProfileResponse(p entity.Profile) profileResponse {
 		Skills:       make([]skillDTO, len(p.Skills)),
 		Version:      p.Version,
 	}
-	if p.PhotoPath != nil {
-		u := photoURLPrefix + path.Base(*p.PhotoPath)
-		res.PhotoURL = &u
-	}
+	res.PhotoURL = httputil.OptionalPhotoURL(p.PhotoPath)
 	for i, s := range p.Skills {
 		res.Skills[i] = skillDTO{ID: s.ID, Name: s.Name}
 	}

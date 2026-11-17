@@ -2,7 +2,6 @@ package history
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,7 +40,7 @@ type pageDTO struct {
 }
 
 type listResponse struct {
-	Days     int       `json:"days"`
+	Days     *int      `json:"days"` // null = no window (admin view)
 	HasOlder bool      `json:"hasOlder"`
 	Items    []itemDTO `json:"items"`
 	Page     pageDTO   `json:"page"`
@@ -49,12 +48,12 @@ type listResponse struct {
 
 // ListOwn: GET /profile/history?field=&page=&pageSize=
 func (h *Handler) ListOwn(c *gin.Context) {
-	page, err := queryInt(c, "page")
+	page, err := httputil.QueryInt(c, "page")
 	if err != nil {
 		httputil.WriteError(c, err)
 		return
 	}
-	pageSize, err := queryInt(c, "pageSize")
+	pageSize, err := httputil.QueryInt(c, "pageSize")
 	if err != nil {
 		httputil.WriteError(c, err)
 		return
@@ -73,17 +72,30 @@ func (h *Handler) ListOwn(c *gin.Context) {
 	c.JSON(http.StatusOK, toListResponse(res))
 }
 
-// queryInt returns 0 when the parameter is absent so the use case applies its default.
-func queryInt(c *gin.Context, name string) (int, error) {
-	s := c.Query(name)
-	if s == "" {
-		return 0, nil
+// AdminList: GET /admin/employees/:id/history?field=&page=&pageSize= (all time)
+func (h *Handler) AdminList(c *gin.Context) {
+	id, ok := httputil.PathID(c, "id")
+	if !ok {
+		return
 	}
-	n, err := strconv.Atoi(s)
+	page, err := httputil.QueryInt(c, "page")
 	if err != nil {
-		return 0, entity.NewValidationError(name, "must be a whole number")
+		httputil.WriteError(c, err)
+		return
 	}
-	return n, nil
+	pageSize, err := httputil.QueryInt(c, "pageSize")
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	res, err := h.uc.ListForEmployee(c.Request.Context(), id, ListInput{
+		Actor: middleware.ActorFrom(c), Field: c.Query("field"), Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		httputil.WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toListResponse(res))
 }
 
 func toListResponse(r Result) listResponse {
@@ -98,8 +110,12 @@ func toListResponse(r Result) listResponse {
 			ChangedBy: changedByDTO{ID: l.ChangedBy.UserID, Role: l.ChangedBy.Role},
 		}
 	}
+	var days *int
+	if !r.AllTime {
+		days = &r.Days
+	}
 	return listResponse{
-		Days:     r.Days,
+		Days:     days,
 		HasOlder: r.HasOlder,
 		Items:    items,
 		Page:     pageDTO{Page: r.Page.Page, PageSize: r.Page.PageSize, HasNext: r.HasNext},

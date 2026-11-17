@@ -77,6 +77,12 @@ func (t *fakeTx) BumpVersion(_ context.Context, e entity.Employee) (int32, error
 	return t.emp.Version, nil
 }
 
+func (t *fakeTx) SaveName(_ context.Context, e entity.Employee) (int32, error) {
+	e.Version++
+	t.emp = e
+	return e.Version, nil
+}
+
 func (t *fakeTx) SavePhoto(_ context.Context, e entity.Employee) (int32, error) {
 	if t.repo.failSave != nil {
 		return 0, t.repo.failSave
@@ -352,6 +358,32 @@ func TestUpdatePhoto(t *testing.T) {
 		_, _, err := upload(uc, "bad", 3)
 		assert.ErrorIs(t, err, entity.ErrPhotoFormat)
 		assert.Zero(t, files.n)
+		assert.False(t, repo.committed)
+	})
+}
+
+func TestUpdateName(t *testing.T) {
+	ctx := context.Background()
+	admin := entity.Actor{UserID: 99, Role: entity.RoleAdmin}
+
+	t.Run("admin renames, each part logged", func(t *testing.T) {
+		repo := newRepo()
+		repo.emp.FirstName, repo.emp.LastName = "Somchai", "Jaidi"
+		v, err := NewUsecase(Deps{Repo: repo}).UpdateName(ctx, UpdateNameInput{
+			Actor: admin, EmployeeID: 10, FirstName: "Somchai", LastName: "Jaidee", Version: 3,
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 4, v)
+		assert.Equal(t, "Jaidee", repo.emp.LastName)
+		assert.Equal(t, []entity.Change{{Field: entity.FieldLastName, Old: "Jaidi", New: "Jaidee"}}, repo.logs)
+	})
+
+	t.Run("employees cannot rename, even themselves", func(t *testing.T) {
+		repo := newRepo()
+		_, err := NewUsecase(Deps{Repo: repo}).UpdateName(ctx, UpdateNameInput{
+			Actor: actor, EmployeeID: actor.EmployeeID, FirstName: "X", LastName: "Y", Version: 3,
+		})
+		assert.ErrorIs(t, err, entity.ErrForbidden)
 		assert.False(t, repo.committed)
 	})
 }

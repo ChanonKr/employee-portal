@@ -31,3 +31,11 @@ RETURNING version;
 UPDATE employees SET version = version + 1, updated_at = now()
 WHERE id = $1 AND version = $2
 RETURNING version;
+
+-- name: UpdateName :one
+UPDATE employees SET first_name = $2, last_name = $3, version = version + 1, updated_at = now()
+WHERE id = $1 AND version = $4
+RETURNING version;
+
+-- name: EmployeeExists :one
+SELECT EXISTS (SELECT 1 FROM employees WHERE id = $1);

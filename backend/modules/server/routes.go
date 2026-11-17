@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"employee-portal/modules/auth"
+	"employee-portal/modules/employee"
 	"employee-portal/modules/entity"
 	"employee-portal/modules/file"
 	"employee-portal/modules/history"
@@ -86,6 +87,13 @@ func (s *Server) routes() {
 	admin.PUT("/skills/order", skillH.Reorder)
 	admin.GET("/settings", settingH.Get)
 	admin.PUT("/settings/history-days", settingH.SetHistoryDays)
+
+	employeeH := employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.pool)))
+	admin.GET("/stats", employeeH.Stats)
+	admin.GET("/employees", employeeH.List)
+	admin.GET("/employees/:id", employeeH.Get)
+	admin.GET("/employees/:id/history", historyH.AdminList)
+	admin.PUT("/employees/:id/name", profileH.AdminUpdateName)
 }
 
 func (s *Server) health(c *gin.Context) {

@@ -71,6 +71,11 @@ func (r *repository) HasOlder(ctx context.Context, employeeID int64, days int) (
 	return ok, database.MapError(err)
 }
 
+func (r *repository) EmployeeExists(ctx context.Context, employeeID int64) (bool, error) {
+	ok, err := r.q.EmployeeExists(ctx, employeeID)
+	return ok, database.MapError(err)
+}
+
 // decode turns a JSONB value into nil, a string or []any (skills).
 func decode(b []byte) (any, error) {
 	if b == nil {

@@ -14,6 +14,7 @@ type Repository interface {
 	// List returns at most limit rows, newest first.
 	List(ctx context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error)
 	HasOlder(ctx context.Context, employeeID int64, days int) (bool, error)
+	EmployeeExists(ctx context.Context, employeeID int64) (bool, error)
 }
 
 type ListInput struct {
@@ -24,6 +25,7 @@ type ListInput struct {
 }
 
 type Result struct {
+	AllTime  bool // admin view: no time window (Days is 0)
 	Days     int  // the window used, so the UI never hard-codes "7"
 	HasOlder bool // true when changes exist before the window
 	Items    []entity.ChangeLog
@@ -34,6 +36,8 @@ type Result struct {
 type Usecase interface {
 	// ListOwn returns the signed-in employee's changes within the history window.
 	ListOwn(ctx context.Context, in ListInput) (Result, error)
+	// ListForEmployee is the admin view: any employee, all history, no time window.
+	ListForEmployee(ctx context.Context, employeeID int64, in ListInput) (Result, error)
 }
 
 type usecase struct {
@@ -46,37 +50,73 @@ func NewUsecase(repo Repository, fallbackDays int) Usecase {
 }
 
 func (u *usecase) ListOwn(ctx context.Context, in ListInput) (Result, error) {
-	page, err := entity.NewPageRequest(in.Page, in.PageSize)
+	q, err := buildQuery(in.Actor.EmployeeID, in)
 	if err != nil {
 		return Result{}, err
-	}
-	q := entity.HistoryQuery{EmployeeID: in.Actor.EmployeeID, PageRequest: page}
-	if in.Field != "" {
-		f, err := entity.ParseFieldName(in.Field)
-		if err != nil {
-			return Result{}, err
-		}
-		q.Field = &f
 	}
 	if q.Days, err = u.historyDays(ctx); err != nil {
 		return Result{}, err
 	}
-
-	// One extra row tells us whether there is a next page without a COUNT query.
-	items, err := u.repo.List(ctx, q, page.PageSize+1)
+	res, err := u.list(ctx, q)
 	if err != nil {
 		return Result{}, err
 	}
-	hasNext := len(items) > page.PageSize
+	if res.HasOlder, err = u.repo.HasOlder(ctx, q.EmployeeID, q.Days); err != nil {
+		return Result{}, err
+	}
+	return res, nil
+}
+
+func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in ListInput) (Result, error) {
+	if err := entity.RequireAdmin(in.Actor); err != nil {
+		return Result{}, err
+	}
+	q, err := buildQuery(employeeID, in) // Days stays 0: no window
+	if err != nil {
+		return Result{}, err
+	}
+	exists, err := u.repo.EmployeeExists(ctx, employeeID)
+	if err != nil {
+		return Result{}, err
+	}
+	if !exists {
+		return Result{}, entity.ErrNotFound
+	}
+	res, err := u.list(ctx, q)
+	if err != nil {
+		return Result{}, err
+	}
+	res.AllTime = true
+	return res, nil
+}
+
+func buildQuery(employeeID int64, in ListInput) (entity.HistoryQuery, error) {
+	page, err := entity.NewPageRequest(in.Page, in.PageSize)
+	if err != nil {
+		return entity.HistoryQuery{}, err
+	}
+	q := entity.HistoryQuery{EmployeeID: employeeID, PageRequest: page}
+	if in.Field != "" {
+		f, err := entity.ParseFieldName(in.Field)
+		if err != nil {
+			return entity.HistoryQuery{}, err
+		}
+		q.Field = &f
+	}
+	return q, nil
+}
+
+// list fetches one extra row to tell whether there is a next page without COUNT.
+func (u *usecase) list(ctx context.Context, q entity.HistoryQuery) (Result, error) {
+	items, err := u.repo.List(ctx, q, q.PageSize+1)
+	if err != nil {
+		return Result{}, err
+	}
+	hasNext := len(items) > q.PageSize
 	if hasNext {
-		items = items[:page.PageSize]
+		items = items[:q.PageSize]
 	}
-
-	hasOlder, err := u.repo.HasOlder(ctx, q.EmployeeID, q.Days)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Days: q.Days, HasOlder: hasOlder, Items: items, Page: page, HasNext: hasNext}, nil
+	return Result{Days: q.Days, Items: items, Page: q.PageRequest, HasNext: hasNext}, nil
 }
 
 // historyDays reads the admin setting (no restart needed after a change).

@@ -156,6 +156,19 @@ func (t *txRepository) SavePhoto(ctx context.Context, e entity.Employee) (int32,
 	return v, nil
 }
 
+func (t *txRepository) SaveName(ctx context.Context, e entity.Employee) (int32, error) {
+	v, err := t.q.UpdateName(ctx, sqlc.UpdateNameParams{
+		ID: e.ID, FirstName: e.FirstName, LastName: e.LastName, Version: e.Version,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, entity.ErrConflict
+	}
+	if err != nil {
+		return 0, database.MapError(err)
+	}
+	return v, nil
+}
+
 func (t *txRepository) BumpVersion(ctx context.Context, e entity.Employee) (int32, error) {
 	v, err := t.q.BumpVersion(ctx, sqlc.BumpVersionParams{ID: e.ID, Version: e.Version})
 	if errors.Is(err, pgx.ErrNoRows) {
