@@ -40,7 +40,11 @@ func (s *Server) routes() {
 		auth.NewUsecase(auth.NewRepository(s.pool), s.tokens),
 		auth.CookieOptions{Secure: s.cfg.IsProduction()},
 	)
-	loginLimiter := middleware.NewKeyedLimiter(5, time.Minute)
+	loginPerMinute := s.cfg.LoginRateLimit
+	if loginPerMinute < 1 {
+		loginPerMinute = 5 // zero value (e.g. a Config built in tests)
+	}
+	loginLimiter := middleware.NewKeyedLimiter(loginPerMinute, time.Minute)
 
 	a := api.Group("/auth")
 	a.POST("/login", middleware.RateLimit(loginLimiter, middleware.ByIP), authH.Login)

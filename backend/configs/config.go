@@ -19,6 +19,8 @@ type Config struct {
 	CORSOrigins    []string      `env:"CORS_ORIGINS" envDefault:"http://localhost:5173" envSeparator:","`
 	TrustedProxies []string      `env:"TRUSTED_PROXIES" envSeparator:","` // e.g. the web container, so ClientIP() is the real client
 	LogLevel       string        `env:"LOG_LEVEL" envDefault:"info"`
+	// Sign-in attempts per minute per IP. Raise only for automated test runs.
+	LoginRateLimit int `env:"LOGIN_RATE_LIMIT" envDefault:"5"`
 }
 
 func Load() (Config, error) {
@@ -31,6 +33,9 @@ func Load() (Config, error) {
 	}
 	if cfg.HistoryDays < 1 || cfg.HistoryDays > 365 {
 		return Config{}, errors.New("HISTORY_DAYS must be between 1 and 365")
+	}
+	if cfg.LoginRateLimit < 1 {
+		return Config{}, errors.New("LOGIN_RATE_LIMIT must be at least 1")
 	}
 	return cfg, nil
 }

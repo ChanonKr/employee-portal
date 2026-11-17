@@ -32,6 +32,8 @@ services:
       # Trust X-Forwarded-For from the web (nginx) container on the compose network,
       # so rate limits see the real client IP.
       TRUSTED_PROXIES: 172.16.0.0/12
+      # E2E runs set this higher (make e2e); real use keeps the default of 5/min.
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-5}
     depends_on:
       migrate: { condition: service_completed_successfully }
     ports: ["8080:8080"]
