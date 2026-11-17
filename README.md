@@ -44,6 +44,21 @@ Other commands: `make help`.
 | GET  | `/files/photos/:name` | |
 | GET  | `/healthz` | |
 
+Admin only (`/api/v1/admin`, checked in the router and again in each use case):
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/stats` | employees, complete profiles, top skills, recent changes |
+| GET | `/employees` | `?q=&page=&pageSize=` |
+| GET | `/employees/:id` | profile + role |
+| GET | `/employees/:id/history` | all time (`days: null`) |
+| PUT | `/employees/:id/name` | `{firstName, lastName}`, `If-Match`; the only way to change a name |
+| GET / POST | `/skills` | list with usage / create |
+| PATCH | `/skills/:id` | `{name?, isActive?}`; skills are turned off, never deleted |
+| PUT | `/skills/order` | `[{id, sortOrder}]`, all or nothing |
+| GET | `/settings` | |
+| PUT | `/settings/history-days` | `{value}` 1–365, applies immediately |
+
 Every write takes `If-Match` with the version from the last read. A stale version returns
 `409 VERSION_CONFLICT`; the update and its history entry are committed in one transaction.
 Errors use one envelope: `{"error": {"code", "message", "fields", "requestId"}}`.
@@ -68,7 +83,7 @@ backend/
 ├── app/main.go               entry point
 ├── modules/
 │   ├── entity/               domain types and business rules (no framework imports)
-│   ├── auth/ profile/ skill/ history/ file/
+│   ├── auth/ profile/ skill/ history/ file/ setting/ employee/
 │   │     handler.go → usecase.go → repository.go
 │   └── server/               router; wires repository → use case → handler
 └── pkg/                      database (migrations, SQL, sqlc), middleware, security, storage, imaging

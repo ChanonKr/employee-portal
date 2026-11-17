@@ -98,7 +98,7 @@ employee-portal/
 │   │   ├── history/                    # GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
 │   │   ├── file/                       # GET /files/photos/:name (handler อย่างเดียว — stream ไฟล์)
 │   │   ├── setting/                    # Admin → Settings (history days)
-│   │   ├── admin/                      # (ขั้นถัดไป) employees, stats
+│   │   ├── employee/                   # Admin → Employees (list, search, detail) + Dashboard stats
 │   ├── pkg/
 │   │   ├── database/
 │   │   │   ├── postgres.go             # pgxpool + ping
@@ -354,7 +354,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 ### Admin (`RequireRole("admin")`)
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/admin/stats` | – | dashboard stats |
+| GET | `/admin/stats` | – | `{employees, completeProfiles, topSkills: [{id, name, usedBy}] (5), recentChanges: [{employeeId, employeeCode, name, field, changedAt, changedByRole}] (5)}` · "ครบ" = รูป + contact ครบ 3 + skill ≥ 1 (ตรงกับ checklist) |
 | GET | `/admin/skills` | – | `[{id, name, isActive, sortOrder, usedBy}]` (รวม inactive) |
 | POST | `/admin/skills` | `{name}` (trim + ยุบช่องว่าง, 1–50 ตัว) | 201 `{id}` · ต่อท้ายรายการ · 409 `ALREADY_EXISTS` ถ้าชื่อซ้ำ (ไม่สนตัวพิมพ์) |
 | PATCH | `/admin/skills/:id` | `{name?, isActive?}` (ต้องมีอย่างน้อย 1) | 204 · 404 id ไม่มี · 409 ชื่อซ้ำ |
@@ -362,11 +362,11 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | GET | `/admin/settings` | – | `{historyDays, updatedBy: {id, employeeCode} \| null, updatedAt \| null}` |
 | PUT | `/admin/settings/history-days` | `{value}` (จำนวนเต็ม 1–365) | 204 · มีผลกับ `/profile/history` ทันที |
 
-module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · ทุก admin use case เรียก `entity.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
-| GET | `/admin/employees` | `?q=&page=&pageSize=` | `{items, page, total}` |
-| GET | `/admin/employees/:id` | – | `Profile` + role |
-| GET | `/admin/employees/:id/history` | `?field=&page=` | เหมือน `/profile/history` (ไม่จำกัดแค่ `days` — admin ดูย้อนหลังได้ทั้งหมด) |
-| PUT | `/admin/employees/:id/name` | `{firstName, lastName}` + `If-Match` | `{version}` |
+module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · รายชื่อ/รายละเอียด/stats อยู่ใน `employee/` · history ของ admin อยู่ใน `history/` · แก้ชื่ออยู่ใน `profile/` (ใช้ lock + version + log เดียวกับการแก้โปรไฟล์) · ทุก admin use case เรียก `entity.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
+| GET | `/admin/employees` | `?q=&page=&pageSize=` · `q` ค้นรหัสพนักงานหรือ "ชื่อ นามสกุล" (ไม่สนตัวพิมพ์, `%` `_` ที่พิมพ์มาเป็นตัวอักษรธรรมดา) | `{items: [{id, employeeCode, firstName, lastName, photoUrl, role, isActive}], page: {page, pageSize, hasNext}, total}` |
+| GET | `/admin/employees/:id` | – | `Profile` + `role`, `isActive`, skills มี `isActive` · `ETag` สำหรับแก้ชื่อ |
+| GET | `/admin/employees/:id/history` | `?field=&page=&pageSize=` | รูปเดียวกับ `/profile/history` แต่ `days: null` = ทั้งหมด (ไม่จำกัดช่วงเวลา) · 404 ถ้าไม่มีพนักงาน |
+| PUT | `/admin/employees/:id/name` | `{firstName, lastName}` (trim, 1–100) + `If-Match` | `{version}` · log `first_name` / `last_name` แยกแถว, `changed_by` = admin |
 
 ### 6.1 ตัวอย่าง Response
 ```json
