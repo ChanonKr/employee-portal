@@ -9,6 +9,45 @@ import (
 	"context"
 )
 
+const createEmployee = `-- name: CreateEmployee :one
+INSERT INTO employees (user_id, first_name, last_name)
+VALUES ($1, $2, $3)
+RETURNING id
+`
+
+type CreateEmployeeParams struct {
+	UserID    int64
+	FirstName string
+	LastName  string
+}
+
+func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createEmployee, arg.UserID, arg.FirstName, arg.LastName)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createUser = `-- name: CreateUser :one
+INSERT INTO users (employee_code, password_hash, role, must_change_password)
+VALUES ($1, $2, $3, TRUE)
+RETURNING id
+`
+
+type CreateUserParams struct {
+	EmployeeCode string
+	PasswordHash string
+	Role         string
+}
+
+// New accounts must change the temporary password on first sign-in.
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createUser, arg.EmployeeCode, arg.PasswordHash, arg.Role)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getUserByCode = `-- name: GetUserByCode :one
 SELECT u.id, u.employee_code, u.password_hash, u.role, u.is_active, u.must_change_password,
        e.id AS employee_id
@@ -73,4 +112,34 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, er
 		&i.EmployeeID,
 	)
 	return i, err
+}
+
+const getUserIDByEmployee = `-- name: GetUserIDByEmployee :one
+SELECT user_id FROM employees WHERE id = $1
+`
+
+func (q *Queries) GetUserIDByEmployee(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, getUserIDByEmployee, id)
+	var user_id int64
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const setPassword = `-- name: SetPassword :execrows
+UPDATE users SET password_hash = $2, must_change_password = $3
+WHERE id = $1
+`
+
+type SetPasswordParams struct {
+	ID                 int64
+	PasswordHash       string
+	MustChangePassword bool
+}
+
+func (q *Queries) SetPassword(ctx context.Context, arg SetPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPassword, arg.ID, arg.PasswordHash, arg.MustChangePassword)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

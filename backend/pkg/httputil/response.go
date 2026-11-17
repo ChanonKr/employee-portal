@@ -53,6 +53,8 @@ func classify(err error) (int, ErrorBody) {
 		return http.StatusBadRequest, ErrorBody{Code: "VALIDATION_ERROR", Message: "If-Match header is invalid.", Fields: map[string]string{"If-Match": "must be a quoted version number"}}
 	case errors.Is(err, entity.ErrUnauthorized):
 		return http.StatusUnauthorized, ErrorBody{Code: "UNAUTHORIZED", Message: "Please sign in."}
+	case errors.Is(err, entity.ErrPasswordChangeRequired):
+		return http.StatusForbidden, ErrorBody{Code: "PASSWORD_CHANGE_REQUIRED", Message: "Please set a new password before continuing."}
 	case errors.Is(err, entity.ErrForbidden):
 		return http.StatusForbidden, ErrorBody{Code: "FORBIDDEN", Message: "You do not have access to this resource."}
 	case errors.Is(err, entity.ErrNotFound):

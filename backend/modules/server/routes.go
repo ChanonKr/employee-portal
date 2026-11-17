@@ -30,7 +30,10 @@ func (s *Server) routes() {
 	api := s.engine.Group("/api/v1", middleware.BodyLimit(jsonBodyLimit))
 	api.GET("/healthz", s.health)
 
-	requireAuth := middleware.Auth(s.tokens)
+	// signedIn: valid session. ready: also not using a temporary password.
+	// /auth/* only needs signedIn, so a user can still see who they are and change it.
+	signedIn := middleware.Auth(s.tokens)
+	ready := middleware.RequirePasswordChanged()
 
 	// ── auth
 	authH := auth.NewHandler(
@@ -42,7 +45,8 @@ func (s *Server) routes() {
 	a := api.Group("/auth")
 	a.POST("/login", middleware.RateLimit(loginLimiter, middleware.ByIP), authH.Login)
 	a.POST("/logout", authH.Logout)
-	a.GET("/me", requireAuth, authH.Me)
+	a.GET("/me", signedIn, authH.Me)
+	a.POST("/change-password", signedIn, middleware.RateLimit(loginLimiter, middleware.ByUser), authH.ChangePassword)
 
 	// ── profile (employee id always comes from the token; the URL has no id)
 	profileH := profile.NewHandler(profile.NewUsecase(profile.Deps{
@@ -52,7 +56,7 @@ func (s *Server) routes() {
 		Log:    s.log,
 	}))
 
-	p := api.Group("/profile", requireAuth, middleware.RequireProfile())
+	p := api.Group("/profile", signedIn, ready, middleware.RequireProfile())
 	p.GET("", profileH.GetProfile)
 	p.PUT("/contact/:field", profileH.UpdateContact)
 	p.PUT("/skills", profileH.SetSkills)
@@ -61,13 +65,13 @@ func (s *Server) routes() {
 	uploadLimiter := middleware.NewKeyedLimiter(10, time.Minute)
 	upload := s.engine.Group("/api/v1/profile",
 		middleware.BodyLimit(s.cfg.UploadMaxBytes+multipartOverhead),
-		requireAuth, middleware.RequireProfile(),
+		signedIn, ready, middleware.RequireProfile(),
 		middleware.RateLimit(uploadLimiter, middleware.ByUser))
 	upload.PUT("/photo", profileH.UpdatePhoto)
 
 	// ── files
 	fileH := file.NewHandler(s.files)
-	api.GET("/files/photos/:name", requireAuth, fileH.Photo)
+	api.GET("/files/photos/:name", signedIn, ready, fileH.Photo)
 
 	// ── history (read-only; writes happen inside the profile transactions)
 	historyH := history.NewHandler(history.NewUsecase(history.NewRepository(s.pool), s.cfg.HistoryDays))
@@ -75,12 +79,12 @@ func (s *Server) routes() {
 
 	// ── skill catalog (picker)
 	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.pool)))
-	api.GET("/skills", requireAuth, skillH.List)
+	api.GET("/skills", signedIn, ready, skillH.List)
 
 	// ── admin (router checks the role; every admin use case checks it again)
 	settingH := setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.pool), s.cfg.HistoryDays))
 
-	admin := api.Group("/admin", requireAuth, middleware.RequireRole(entity.RoleAdmin))
+	admin := api.Group("/admin", signedIn, ready, middleware.RequireRole(entity.RoleAdmin))
 	admin.GET("/skills", skillH.AdminList)
 	admin.POST("/skills", skillH.Create)
 	admin.PATCH("/skills/:id", skillH.Update)
@@ -94,6 +98,8 @@ func (s *Server) routes() {
 	admin.GET("/employees/:id", employeeH.Get)
 	admin.GET("/employees/:id/history", historyH.AdminList)
 	admin.PUT("/employees/:id/name", profileH.AdminUpdateName)
+	admin.POST("/employees", authH.AdminCreateAccount)
+	admin.POST("/employees/:id/reset-password", authH.AdminResetPassword)
 }
 
 func (s *Server) health(c *gin.Context) {

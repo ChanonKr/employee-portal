@@ -33,6 +33,18 @@ func Auth(tokens *security.TokenManager) gin.HandlerFunc {
 	}
 }
 
+// RequirePasswordChanged blocks accounts that still use a temporary password.
+// Every route except /auth/* uses it.
+func RequirePasswordChanged() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if ActorFrom(c).MustChangePassword {
+			httputil.WriteError(c, entity.ErrPasswordChangeRequired)
+			return
+		}
+		c.Next()
+	}
+}
+
 // ActorFrom returns the Actor set by Auth. Only call it on routes behind Auth.
 func ActorFrom(c *gin.Context) entity.Actor {
 	return c.MustGet(actorKey).(entity.Actor)
