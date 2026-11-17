@@ -8,9 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"employee-portal/modules/auth"
+	"employee-portal/modules/entity"
 	"employee-portal/modules/file"
 	"employee-portal/modules/history"
 	"employee-portal/modules/profile"
+	"employee-portal/modules/setting"
 	"employee-portal/modules/skill"
 	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/middleware"
@@ -73,6 +75,17 @@ func (s *Server) routes() {
 	// ── skill catalog (picker)
 	skillH := skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.pool)))
 	api.GET("/skills", requireAuth, skillH.List)
+
+	// ── admin (router checks the role; every admin use case checks it again)
+	settingH := setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.pool), s.cfg.HistoryDays))
+
+	admin := api.Group("/admin", requireAuth, middleware.RequireRole(entity.RoleAdmin))
+	admin.GET("/skills", skillH.AdminList)
+	admin.POST("/skills", skillH.Create)
+	admin.PATCH("/skills/:id", skillH.Update)
+	admin.PUT("/skills/order", skillH.Reorder)
+	admin.GET("/settings", settingH.Get)
+	admin.PUT("/settings/history-days", settingH.SetHistoryDays)
 }
 
 func (s *Server) health(c *gin.Context) {

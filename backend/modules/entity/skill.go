@@ -1,6 +1,10 @@
 package entity
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
 
 // MaxSkills is the most skills one employee can select.
 const MaxSkills = 20
@@ -86,4 +90,50 @@ func skillNames(skills []Skill) []string {
 		names[i] = s.Name
 	}
 	return names
+}
+
+const maxSkillNameLength = 50
+
+// NormalizeSkillName trims and collapses inner whitespace, then checks the length.
+// Uniqueness (case-insensitive) is enforced by the database.
+func NormalizeSkillName(raw string) (string, error) {
+	name := strings.Join(strings.Fields(raw), " ")
+	n := utf8.RuneCountInString(name)
+	if n == 0 {
+		return "", NewValidationError("name", "is required")
+	}
+	if n > maxSkillNameLength {
+		return "", NewValidationError("name", "must be at most 50 characters")
+	}
+	return name, nil
+}
+
+// SkillUsage is a catalog row for the admin screen.
+type SkillUsage struct {
+	Skill
+	SortOrder int32
+	UsedBy    int64 // employees who have this skill
+}
+
+// SkillOrder sets one skill's position in the picker.
+type SkillOrder struct {
+	ID        int64
+	SortOrder int32
+}
+
+func ValidateSkillOrder(items []SkillOrder) error {
+	if len(items) == 0 {
+		return NewValidationError("order", "must not be empty")
+	}
+	seen := make(map[int64]struct{}, len(items))
+	for _, it := range items {
+		if it.ID <= 0 || it.SortOrder < 0 {
+			return NewValidationError("order", "ids must be positive and sortOrder 0 or more")
+		}
+		if _, dup := seen[it.ID]; dup {
+			return NewValidationError("order", "must not contain duplicate ids")
+		}
+		seen[it.ID] = struct{}{}
+	}
+	return nil
 }

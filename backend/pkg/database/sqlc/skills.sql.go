@@ -9,6 +9,62 @@ import (
 	"context"
 )
 
+const adminListSkills = `-- name: AdminListSkills :many
+SELECT s.id, s.name, s.is_active, s.sort_order, count(es.employee_id) AS used_by
+FROM skills s
+LEFT JOIN employee_skills es ON es.skill_id = s.id
+GROUP BY s.id
+ORDER BY s.sort_order, s.name
+`
+
+type AdminListSkillsRow struct {
+	ID        int64
+	Name      string
+	IsActive  bool
+	SortOrder int32
+	UsedBy    int64
+}
+
+func (q *Queries) AdminListSkills(ctx context.Context) ([]AdminListSkillsRow, error) {
+	rows, err := q.db.Query(ctx, adminListSkills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminListSkillsRow{}
+	for rows.Next() {
+		var i AdminListSkillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.IsActive,
+			&i.SortOrder,
+			&i.UsedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const createSkill = `-- name: CreateSkill :one
+INSERT INTO skills (name, sort_order)
+VALUES ($1, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM skills))
+RETURNING id
+`
+
+// New skills go to the end of the list.
+func (q *Queries) CreateSkill(ctx context.Context, name string) (int64, error) {
+	row := q.db.QueryRow(ctx, createSkill, name)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const deleteEmployeeSkills = `-- name: DeleteEmployeeSkills :exec
 DELETE FROM employee_skills WHERE employee_id = $1
 `
@@ -133,4 +189,47 @@ func (q *Queries) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]L
 		return nil, err
 	}
 	return items, nil
+}
+
+const reorderSkills = `-- name: ReorderSkills :execrows
+UPDATE skills
+SET sort_order = ($1::int[])[array_position($2::bigint[], id)]
+WHERE id = ANY($2::bigint[])
+`
+
+type ReorderSkillsParams struct {
+	SortOrders []int32
+	Ids        []int64
+}
+
+// ids[i] gets sort_orders[i]. The repository runs it in a transaction and rolls
+// back unless every id matched.
+func (q *Queries) ReorderSkills(ctx context.Context, arg ReorderSkillsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reorderSkills, arg.SortOrders, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateSkill = `-- name: UpdateSkill :execrows
+UPDATE skills SET
+  name      = COALESCE($1::text, name),
+  is_active = COALESCE($2::bool, is_active)
+WHERE id = $3
+`
+
+type UpdateSkillParams struct {
+	Name     *string
+	IsActive *bool
+	ID       int64
+}
+
+// NULL keeps the current value. 0 rows = unknown id.
+func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSkill, arg.Name, arg.IsActive, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
