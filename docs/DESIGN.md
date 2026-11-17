@@ -567,15 +567,17 @@ INSERT INTO skills (name, sort_order) VALUES
 
 **`PUT /profile/skills` (แทนทั้งชุดใน request เดียว)** — `profile.SetSkills` ใน 1 transaction:
 ```
-ValidateSkillIDs (≤ 20, ไม่ซ้ำ, > 0 — ก่อนเปิด tx)
-→ GetForUpdate (lock) → CheckVersion
+ValidateSkillIDs (≤ 20, ไม่ซ้ำ, > 0 — ตัดทิ้งก่อนเปิด tx)
+→ GetForUpdate (lock)
 → ListEmployeeSkills (ชุดเดิม) + GetSkillsByIDs (ชุดใหม่ รวม inactive)
-→ CheckSkillSelection: ทุก id ต้องมีจริง · inactive ได้เฉพาะตัวที่พนักงานมีอยู่แล้ว
-→ ReplaceSkills (delete + insert) → BumpVersion
-→ SkillsChange: ถ้าชุดต่างจากเดิม (ไม่สนลำดับ) log ชื่อ ["Go","Flutter"] → ["Go","React"]
+→ emp.ChangeSkills(requested, current, selected, version)   ← กฎทั้งหมดอยู่ที่นี่
+     ValidateSkillIDs → CheckVersion → ทุก id ต้องมีจริง · inactive ได้เฉพาะตัวที่มีอยู่แล้ว
+     → คืน Change (log ชื่อ ["Go","Flutter"] → ["Go","React"]) หรือ nil ถ้าชุดเดิม (ไม่สนลำดับ)
+→ ReplaceSkills (delete + insert) → BumpVersion → AppendChange ถ้ามี Change
 ```
+- pattern เดียวกับ contact: use case = โหลด → `emp.ChangeXxx(...)` → บันทึก → log
 - `[]` = ล้างทุก skill (ได้) · ไม่ส่ง `skillIds` = 400
-- กฎทั้งหมดอยู่ใน `entity/skill.go` ทดสอบแบบไม่ต้องมี DB
+- กฎทดสอบใน `entity/employee_test.go` แบบไม่ต้องมี DB
 
 ---
 
