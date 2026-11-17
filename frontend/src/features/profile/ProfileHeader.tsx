@@ -1,5 +1,5 @@
 import { Camera, Loader2, Lock } from 'lucide-react'
-import { useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/client'
 import type { Profile } from '@/api/types'
@@ -23,16 +23,31 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
   const input = useRef<HTMLInputElement>(null)
   const upload = useUploadPhoto()
   const [dragging, setDragging] = useState(false)
+  // A chosen or dropped file waits here as a preview until the user saves it,
+  // so a stray drop never replaces the photo.
+  const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
 
-  const send = (file: File | undefined) => {
+  useEffect(() => () => {
+    if (pending) URL.revokeObjectURL(pending.url)
+  }, [pending])
+
+  const choose = (file: File | undefined) => {
     if (!file) return
     const problem = checkPhoto(file)
     if (problem) {
       toast.error(problem)
       return
     }
-    upload.mutate(file, {
-      onSuccess: () => toast.success('Photo updated'),
+    setPending({ file, url: URL.createObjectURL(file) })
+  }
+
+  const save = () => {
+    if (!pending) return
+    upload.mutate(pending.file, {
+      onSuccess: () => {
+        toast.success('Photo updated')
+        setPending(null)
+      },
       onError: (e) => toast.error(errorMessage(e)),
     })
   }
@@ -40,10 +55,10 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
   const onDrop = (e: DragEvent) => {
     e.preventDefault()
     setDragging(false)
-    send(e.dataTransfer.files[0])
+    if (!upload.isPending) choose(e.dataTransfer.files[0])
   }
 
-  const hasPhoto = !!profile.photoUrl
+  const hasPhoto = !!profile.photoUrl || !!pending
 
   return (
     <Card className="flex flex-col items-center gap-4 text-center">
@@ -57,7 +72,7 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
         onDrop={onDrop}
       >
         {hasPhoto ? (
-          <Avatar url={profile.photoUrl} firstName={profile.firstName} lastName={profile.lastName} className="size-28" />
+          <Avatar url={pending?.url ?? profile.photoUrl} firstName={profile.firstName} lastName={profile.lastName} className="size-28" />
         ) : (
           <button
             type="button"
@@ -75,7 +90,7 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
             <Loader2 className="size-6 animate-spin text-white" />
           </div>
         )}
-        {hasPhoto && (
+        {hasPhoto && !pending && (
           <Button
             variant="secondary"
             size="icon"
@@ -95,11 +110,25 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
           tabIndex={-1}
           aria-label="Profile photo"
           onChange={(e) => {
-            send(e.target.files?.[0])
+            choose(e.target.files?.[0])
             e.target.value = '' // allow choosing the same file again
           }}
         />
       </div>
+
+      {pending && (
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-sm text-muted">Preview — save to use this photo.</p>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setPending(null)} disabled={upload.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={save} loading={upload.isPending}>
+              Save photo
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div>
         <h1 className="flex items-center justify-center gap-1.5 text-xl font-semibold break-words">
@@ -109,7 +138,7 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
         <p className="mt-0.5 text-sm text-muted">{profile.employeeCode}</p>
         <p className="mt-2 text-xs text-muted">Your name comes from HR records. Contact HR to change it.</p>
       </div>
-      <p className="hidden text-xs text-muted md:block">Drag a photo onto the picture to upload. JPEG, PNG or WebP, up to 5 MB.</p>
+      <p className="hidden text-xs text-muted md:block">Drag a photo onto the picture to preview it, then save. JPEG, PNG or WebP, up to 5 MB.</p>
     </Card>
   )
 }

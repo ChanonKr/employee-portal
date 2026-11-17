@@ -48,6 +48,10 @@ test('choose skills and upload a photo', async ({ signedIn: page }) => {
   await expect(page.getByRole('list', { name: 'Your skills' }).getByText('React')).toBeVisible()
 
   await page.getByLabel('Profile photo').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: tinyPng() })
+  // Choosing only previews; nothing is uploaded until "Save photo".
+  await expect(page.getByRole('button', { name: 'Save photo' })).toBeVisible()
+  await expect(page.getByText('Photo updated')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Save photo' }).click()
   await expect(page.getByText('Photo updated')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Change photo' })).toBeVisible()
 })
