@@ -1,10 +1,13 @@
-package entity
+package domain
 
 import (
 	"net/mail"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/shared"
 )
 
 // ContactField is a contact detail the employee can edit, one field per request.
@@ -31,18 +34,18 @@ func ParseContactField(s string) (ContactField, error) {
 	case ContactMobile, ContactEmail, ContactAddress:
 		return f, nil
 	}
-	return "", NewValidationError("field", "unknown contact field")
+	return "", shared.NewValidationError("field", "unknown contact field")
 }
 
 // LogField is the name stored in the change history.
-func (f ContactField) LogField() FieldName {
+func (f ContactField) LogField() historydomain.FieldName {
 	switch f {
 	case ContactMobile:
-		return FieldMobilePhone
+		return historydomain.FieldMobilePhone
 	case ContactEmail:
-		return FieldContactEmail
+		return historydomain.FieldContactEmail
 	default:
-		return FieldAddress
+		return historydomain.FieldAddress
 	}
 }
 
@@ -62,24 +65,24 @@ func (f ContactField) Validate(v string) error {
 	switch f {
 	case ContactMobile:
 		if !mobilePattern.MatchString(v) {
-			return NewValidationError(string(f), "must be 9–15 digits, optionally starting with +")
+			return shared.NewValidationError(string(f), "must be 9–15 digits, optionally starting with +")
 		}
 	case ContactEmail:
 		if len(v) > maxEmailLength {
-			return NewValidationError(string(f), "must be at most 254 characters")
+			return shared.NewValidationError(string(f), "must be at most 254 characters")
 		}
 		// ParseAddress also accepts `Name <a@b.c>`; require a bare address.
 		addr, err := mail.ParseAddress(v)
 		if err != nil || addr.Address != v {
-			return NewValidationError(string(f), "must be a valid email address")
+			return shared.NewValidationError(string(f), "must be a valid email address")
 		}
 	case ContactAddress:
 		n := utf8.RuneCountInString(v)
 		if n == 0 {
-			return NewValidationError(string(f), "is required")
+			return shared.NewValidationError(string(f), "is required")
 		}
 		if n > maxAddressLength {
-			return NewValidationError(string(f), "must be at most 500 characters")
+			return shared.NewValidationError(string(f), "must be at most 500 characters")
 		}
 	}
 	return nil

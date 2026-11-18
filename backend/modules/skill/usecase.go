@@ -3,7 +3,8 @@ package skill
 import (
 	"context"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 )
 
 type UpdateInput struct {
@@ -20,22 +21,22 @@ func NewUsecase(repo Repository) Usecase {
 	return &usecase{repo: repo}
 }
 
-func (u *usecase) ListActive(ctx context.Context) ([]entity.Skill, error) {
+func (u *usecase) ListActive(ctx context.Context) ([]skilldomain.Skill, error) {
 	return u.repo.ListActive(ctx)
 }
 
-func (u *usecase) AdminList(ctx context.Context, actor entity.Actor) ([]entity.SkillUsage, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) AdminList(ctx context.Context, actor shared.Actor) ([]skilldomain.SkillUsage, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return nil, err
 	}
 	return u.repo.ListAll(ctx)
 }
 
-func (u *usecase) Create(ctx context.Context, actor entity.Actor, raw string) (int64, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) Create(ctx context.Context, actor shared.Actor, raw string) (int64, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return 0, err
 	}
-	name, err := entity.NormalizeSkillName(raw)
+	name, err := skilldomain.NormalizeSkillName(raw)
 	if err != nil {
 		return 0, err
 	}
@@ -44,15 +45,15 @@ func (u *usecase) Create(ctx context.Context, actor entity.Actor, raw string) (i
 
 // Update renames and/or turns a skill on or off. Skills are never deleted:
 // turning one off hides it from the picker, and employees who have it keep it.
-func (u *usecase) Update(ctx context.Context, actor entity.Actor, in UpdateInput) error {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) Update(ctx context.Context, actor shared.Actor, in UpdateInput) error {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return err
 	}
 	if in.Name == nil && in.IsActive == nil {
-		return entity.NewValidationError("body", "nothing to update")
+		return shared.NewValidationError("body", "nothing to update")
 	}
 	if in.Name != nil {
-		name, err := entity.NormalizeSkillName(*in.Name)
+		name, err := skilldomain.NormalizeSkillName(*in.Name)
 		if err != nil {
 			return err
 		}
@@ -61,11 +62,11 @@ func (u *usecase) Update(ctx context.Context, actor entity.Actor, in UpdateInput
 	return u.repo.Update(ctx, in.ID, in.Name, in.IsActive)
 }
 
-func (u *usecase) Reorder(ctx context.Context, actor entity.Actor, items []entity.SkillOrder) error {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) Reorder(ctx context.Context, actor shared.Actor, items []skilldomain.SkillOrder) error {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return err
 	}
-	if err := entity.ValidateSkillOrder(items); err != nil {
+	if err := skilldomain.ValidateSkillOrder(items); err != nil {
 		return err
 	}
 	return u.repo.Reorder(ctx, items)

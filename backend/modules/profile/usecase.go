@@ -5,31 +5,33 @@ import (
 	"io"
 	"log/slog"
 
-	"employee-portal/modules/entity"
+	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 )
 
 type UpdateContactInput struct {
-	Actor   entity.Actor
+	Actor   shared.Actor
 	Field   string
 	Value   string
 	Version int32 // from If-Match
 }
 
 type SetSkillsInput struct {
-	Actor    entity.Actor
+	Actor    shared.Actor
 	SkillIDs []int64
 	Version  int32 // from If-Match
 }
 
 type UpdatePhotoInput struct {
-	Actor   entity.Actor
+	Actor   shared.Actor
 	File    io.Reader
 	Version int32 // from If-Match
 }
 
 // UpdateNameInput is the admin-only legal name change.
 type UpdateNameInput struct {
-	Actor      entity.Actor // must be an admin
+	Actor      shared.Actor // must be an admin
 	EmployeeID int64        // from the URL
 	FirstName  string
 	LastName   string
@@ -57,14 +59,14 @@ func NewUsecase(d Deps) Usecase {
 	return &usecase{repo: d.Repo, photos: d.Photos, files: d.Files, log: d.Log}
 }
 
-func (u *usecase) GetProfile(ctx context.Context, actor entity.Actor) (entity.Profile, error) {
+func (u *usecase) GetProfile(ctx context.Context, actor shared.Actor) (profiledomain.Profile, error) {
 	return u.repo.GetProfile(ctx, actor.EmployeeID)
 }
 
 // UpdateContact: lock row → apply domain rule → save (version + 1) → log if changed.
 // The update and its history entry commit together or not at all.
 func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int32, error) {
-	field, err := entity.ParseContactField(in.Field)
+	field, err := profiledomain.ParseContactField(in.Field)
 	if err != nil {
 		return 0, err
 	}
@@ -97,7 +99,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 // lock row → load current + requested skills → apply domain rule → replace → version + 1 → log if changed.
 func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, error) {
 	// Reject a malformed list before opening a transaction (ChangeSkills checks it again).
-	if err := entity.ValidateSkillIDs(in.SkillIDs); err != nil {
+	if err := skilldomain.ValidateSkillIDs(in.SkillIDs); err != nil {
 		return 0, err
 	}
 
@@ -192,7 +194,7 @@ func (u *usecase) deleteFile(ctx context.Context, name, reason string) {
 // UpdateName is the only way to change a name (employees have no route for it).
 // Each changed part is logged separately with the admin as changed_by.
 func (u *usecase) UpdateName(ctx context.Context, in UpdateNameInput) (int32, error) {
-	if err := entity.RequireAdmin(in.Actor); err != nil {
+	if err := shared.RequireAdmin(in.Actor); err != nil {
 		return 0, err
 	}
 	var newVersion int32

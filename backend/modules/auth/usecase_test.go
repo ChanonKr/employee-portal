@@ -8,35 +8,36 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
+	authdomain "employee-portal/modules/auth/domain"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/security"
 )
 
-type fakeRepo struct{ users map[string]entity.User }
+type fakeRepo struct{ users map[string]authdomain.User }
 
-func (f *fakeRepo) GetUserByCode(_ context.Context, code string) (entity.User, error) {
+func (f *fakeRepo) GetUserByCode(_ context.Context, code string) (authdomain.User, error) {
 	u, ok := f.users[code]
 	if !ok {
-		return entity.User{}, entity.ErrNotFound
+		return authdomain.User{}, shared.ErrNotFound
 	}
 	return u, nil
 }
 
-func (f *fakeRepo) GetUserByID(_ context.Context, id int64) (entity.User, error) {
+func (f *fakeRepo) GetUserByID(_ context.Context, id int64) (authdomain.User, error) {
 	for _, u := range f.users {
 		if u.ID == id {
 			return u, nil
 		}
 	}
-	return entity.User{}, entity.ErrNotFound
+	return authdomain.User{}, shared.ErrNotFound
 }
 
-func (f *fakeRepo) CreateAccount(_ context.Context, a entity.NewAccount, hash string) (int64, int64, error) {
+func (f *fakeRepo) CreateAccount(_ context.Context, a authdomain.NewAccount, hash string) (int64, int64, error) {
 	if _, taken := f.users[a.EmployeeCode]; taken {
-		return 0, 0, entity.ErrDuplicate
+		return 0, 0, shared.ErrDuplicate
 	}
 	emp := int64(100 + len(f.users))
-	f.users[a.EmployeeCode] = entity.User{ID: int64(len(f.users) + 1), EmployeeCode: a.EmployeeCode,
+	f.users[a.EmployeeCode] = authdomain.User{ID: int64(len(f.users) + 1), EmployeeCode: a.EmployeeCode,
 		PasswordHash: hash, Role: a.Role, IsActive: true, MustChangePassword: true, EmployeeID: &emp}
 	return int64(len(f.users)), emp, nil
 }
@@ -49,7 +50,7 @@ func (f *fakeRepo) SetPassword(_ context.Context, userID int64, hash string, mus
 			return nil
 		}
 	}
-	return entity.ErrNotFound
+	return shared.ErrNotFound
 }
 
 func (f *fakeRepo) UserIDByEmployee(_ context.Context, employeeID int64) (int64, error) {
@@ -58,12 +59,12 @@ func (f *fakeRepo) UserIDByEmployee(_ context.Context, employeeID int64) (int64,
 			return u.ID, nil
 		}
 	}
-	return 0, entity.ErrNotFound
+	return 0, shared.ErrNotFound
 }
 
-type fakeTokens struct{ issued entity.Actor }
+type fakeTokens struct{ issued shared.Actor }
 
-func (f *fakeTokens) Issue(a entity.Actor) (string, time.Time, error) {
+func (f *fakeTokens) Issue(a shared.Actor) (string, time.Time, error) {
 	f.issued = a
 	return "token", time.Now().Add(time.Hour), nil
 }
@@ -78,9 +79,9 @@ func newUsecaseWithRepo(t *testing.T) (Usecase, *fakeTokens, *fakeRepo) {
 	hash, err := security.HashPassword("demo1234")
 	require.NoError(t, err)
 	emp := int64(7)
-	repo := &fakeRepo{users: map[string]entity.User{
-		"EMP-00001": {ID: 1, EmployeeCode: "EMP-00001", PasswordHash: hash, Role: entity.RoleEmployee, IsActive: true, EmployeeID: &emp},
-		"EMP-00009": {ID: 9, EmployeeCode: "EMP-00009", PasswordHash: hash, Role: entity.RoleEmployee, IsActive: false},
+	repo := &fakeRepo{users: map[string]authdomain.User{
+		"EMP-00001": {ID: 1, EmployeeCode: "EMP-00001", PasswordHash: hash, Role: shared.RoleEmployee, IsActive: true, EmployeeID: &emp},
+		"EMP-00009": {ID: 9, EmployeeCode: "EMP-00009", PasswordHash: hash, Role: shared.RoleEmployee, IsActive: false},
 	}}
 	tokens := &fakeTokens{}
 	return NewUsecase(repo, tokens), tokens, repo
@@ -94,7 +95,7 @@ func TestLogin(t *testing.T) {
 		s, err := uc.Login(ctx, " emp-00001 ", "demo1234")
 		require.NoError(t, err)
 		assert.Equal(t, "token", s.Token)
-		assert.Equal(t, entity.Actor{UserID: 1, EmployeeID: 7, Role: entity.RoleEmployee}, tokens.issued)
+		assert.Equal(t, shared.Actor{UserID: 1, EmployeeID: 7, Role: shared.RoleEmployee}, tokens.issued)
 	})
 
 	for name, tc := range map[string]struct{ code, password string }{
@@ -105,18 +106,18 @@ func TestLogin(t *testing.T) {
 		t.Run(name+" is the same unauthorized error", func(t *testing.T) {
 			uc, _ := newUsecase(t)
 			_, err := uc.Login(ctx, tc.code, tc.password)
-			assert.ErrorIs(t, err, entity.ErrUnauthorized)
+			assert.ErrorIs(t, err, shared.ErrUnauthorized)
 		})
 	}
 }
 
 func TestMe_InactiveUserLosesAccess(t *testing.T) {
 	uc, _ := newUsecase(t)
-	_, err := uc.Me(context.Background(), entity.Actor{UserID: 9})
-	assert.ErrorIs(t, err, entity.ErrUnauthorized)
+	_, err := uc.Me(context.Background(), shared.Actor{UserID: 9})
+	assert.ErrorIs(t, err, shared.ErrUnauthorized)
 }
 
-var admin = entity.Actor{UserID: 50, Role: entity.RoleAdmin}
+var admin = shared.Actor{UserID: 50, Role: shared.RoleAdmin}
 
 func TestCreateAccount_ThenFirstLoginMustChangePassword(t *testing.T) {
 	ctx := context.Background()
@@ -134,11 +135,11 @@ func TestCreateAccount_ThenFirstLoginMustChangePassword(t *testing.T) {
 	// Wrong current password is a 400-style validation error, not 401.
 	actor := tokens.issued
 	_, err = uc.ChangePassword(ctx, actor, "nope", "brandnew123")
-	assert.ErrorIs(t, err, entity.ErrValidation)
+	assert.ErrorIs(t, err, shared.ErrValidation)
 	_, err = uc.ChangePassword(ctx, actor, acc.TemporaryPassword, "short")
-	assert.ErrorIs(t, err, entity.ErrValidation)
+	assert.ErrorIs(t, err, shared.ErrValidation)
 	_, err = uc.ChangePassword(ctx, actor, acc.TemporaryPassword, acc.TemporaryPassword)
-	assert.ErrorIs(t, err, entity.ErrValidation, "must differ")
+	assert.ErrorIs(t, err, shared.ErrValidation, "must differ")
 
 	s, err = uc.ChangePassword(ctx, actor, acc.TemporaryPassword, "brandnew123")
 	require.NoError(t, err)
@@ -146,12 +147,12 @@ func TestCreateAccount_ThenFirstLoginMustChangePassword(t *testing.T) {
 	assert.False(t, tokens.issued.MustChangePassword, "new session without the flag")
 
 	_, err = uc.Login(ctx, "EMP-00077", acc.TemporaryPassword)
-	assert.ErrorIs(t, err, entity.ErrUnauthorized, "old password no longer works")
+	assert.ErrorIs(t, err, shared.ErrUnauthorized, "old password no longer works")
 	_, err = uc.Login(ctx, "EMP-00077", "brandnew123")
 	assert.NoError(t, err)
 
 	_, err = uc.CreateAccount(ctx, admin, CreateAccountInput{EmployeeCode: "EMP-00077", FirstName: "A", LastName: "B"})
-	assert.ErrorIs(t, err, entity.ErrDuplicate)
+	assert.ErrorIs(t, err, shared.ErrDuplicate)
 }
 
 func TestResetPassword(t *testing.T) {
@@ -161,23 +162,23 @@ func TestResetPassword(t *testing.T) {
 	temp, err := uc.ResetPassword(ctx, admin, 7) // EMP-00001 has employee id 7
 	require.NoError(t, err)
 	_, err = uc.Login(ctx, "EMP-00001", "demo1234")
-	assert.ErrorIs(t, err, entity.ErrUnauthorized)
+	assert.ErrorIs(t, err, shared.ErrUnauthorized)
 	_, err = uc.Login(ctx, "EMP-00001", temp)
 	require.NoError(t, err)
 	assert.True(t, tokens.issued.MustChangePassword)
 
 	_, err = uc.ResetPassword(ctx, admin, 999)
-	assert.ErrorIs(t, err, entity.ErrNotFound)
+	assert.ErrorIs(t, err, shared.ErrNotFound)
 }
 
 func TestAccountAdminRequiresAdmin(t *testing.T) {
 	ctx := context.Background()
 	uc, _, repo := newUsecaseWithRepo(t)
-	employee := entity.Actor{UserID: 1, EmployeeID: 7, Role: entity.RoleEmployee}
+	employee := shared.Actor{UserID: 1, EmployeeID: 7, Role: shared.RoleEmployee}
 
 	_, err := uc.CreateAccount(ctx, employee, CreateAccountInput{EmployeeCode: "EMP-5", FirstName: "A", LastName: "B"})
-	assert.ErrorIs(t, err, entity.ErrForbidden)
+	assert.ErrorIs(t, err, shared.ErrForbidden)
 	_, err = uc.ResetPassword(ctx, employee, 7)
-	assert.ErrorIs(t, err, entity.ErrForbidden)
+	assert.ErrorIs(t, err, shared.ErrForbidden)
 	assert.Len(t, repo.users, 2, "nothing created")
 }

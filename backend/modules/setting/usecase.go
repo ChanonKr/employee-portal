@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strconv"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
+	settingdomain "employee-portal/modules/setting/domain"
+	"employee-portal/modules/shared"
 )
 
 const keyHistoryDays = "history_days"
@@ -19,29 +21,29 @@ func NewUsecase(repo Repository, fallbackDays int) Usecase {
 	return &usecase{repo: repo, fallbackDays: fallbackDays}
 }
 
-func (u *usecase) GetHistory(ctx context.Context, actor entity.Actor) (entity.HistorySettings, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
-		return entity.HistorySettings{}, err
+func (u *usecase) GetHistory(ctx context.Context, actor shared.Actor) (settingdomain.HistorySettings, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
+		return settingdomain.HistorySettings{}, err
 	}
 	raw, s, err := u.repo.Get(ctx, keyHistoryDays)
-	if errors.Is(err, entity.ErrNotFound) {
-		return entity.HistorySettings{Days: u.fallbackDays}, nil
+	if errors.Is(err, shared.ErrNotFound) {
+		return settingdomain.HistorySettings{Days: u.fallbackDays}, nil
 	}
 	if err != nil {
-		return entity.HistorySettings{}, err
+		return settingdomain.HistorySettings{}, err
 	}
 	// Same fallback rule as the history page, so admins see the value in effect.
-	if s.Days, err = entity.ParseHistoryDays(raw); err != nil {
+	if s.Days, err = historydomain.ParseHistoryDays(raw); err != nil {
 		s.Days = u.fallbackDays
 	}
 	return s, nil
 }
 
-func (u *usecase) SetHistoryDays(ctx context.Context, actor entity.Actor, days int) error {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) SetHistoryDays(ctx context.Context, actor shared.Actor, days int) error {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return err
 	}
-	if err := entity.ValidateHistoryDays(days); err != nil {
+	if err := settingdomain.ValidateHistoryDays(days); err != nil {
 		return err
 	}
 	return u.repo.Set(ctx, keyHistoryDays, strconv.Itoa(days), actor)

@@ -11,23 +11,26 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
+	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 )
 
 // fakeRepo is an in-memory Repository. WithTx works on a copy and only keeps it
 // when fn succeeds, mimicking commit/rollback.
 type fakeRepo struct {
-	emp       entity.Employee
-	skills    []int64        // employee's skill ids
-	catalog   []entity.Skill // all skills, in display order
-	logs      []entity.Change
+	emp       profiledomain.Employee
+	skills    []int64             // employee's skill ids
+	catalog   []skilldomain.Skill // all skills, in display order
+	logs      []historydomain.Change
 	failSave  error
 	failLog   error
 	committed bool
 }
 
-func (f *fakeRepo) GetProfile(context.Context, int64) (entity.Profile, error) {
-	return entity.Profile{Employee: f.emp}, nil
+func (f *fakeRepo) GetProfile(context.Context, int64) (profiledomain.Profile, error) {
+	return profiledomain.Profile{Employee: f.emp}, nil
 }
 
 func (f *fakeRepo) WithTx(_ context.Context, fn func(TxRepository) error) error {
@@ -44,13 +47,13 @@ func (f *fakeRepo) WithTx(_ context.Context, fn func(TxRepository) error) error 
 
 type fakeTx struct {
 	repo   *fakeRepo
-	emp    entity.Employee
+	emp    profiledomain.Employee
 	skills []int64
-	logs   []entity.Change
+	logs   []historydomain.Change
 }
 
-func (t *fakeTx) skillsWhere(keep func(id int64) bool) []entity.Skill {
-	out := []entity.Skill{}
+func (t *fakeTx) skillsWhere(keep func(id int64) bool) []skilldomain.Skill {
+	out := []skilldomain.Skill{}
 	for _, s := range t.repo.catalog {
 		if keep(s.ID) {
 			out = append(out, s)
@@ -59,11 +62,11 @@ func (t *fakeTx) skillsWhere(keep func(id int64) bool) []entity.Skill {
 	return out
 }
 
-func (t *fakeTx) ListEmployeeSkills(context.Context, int64) ([]entity.Skill, error) {
+func (t *fakeTx) ListEmployeeSkills(context.Context, int64) ([]skilldomain.Skill, error) {
 	return t.skillsWhere(func(id int64) bool { return contains(t.skills, id) }), nil
 }
 
-func (t *fakeTx) GetSkillsByIDs(_ context.Context, ids []int64) ([]entity.Skill, error) {
+func (t *fakeTx) GetSkillsByIDs(_ context.Context, ids []int64) ([]skilldomain.Skill, error) {
 	return t.skillsWhere(func(id int64) bool { return contains(ids, id) }), nil
 }
 
@@ -72,18 +75,18 @@ func (t *fakeTx) ReplaceSkills(_ context.Context, _ int64, ids []int64) error {
 	return nil
 }
 
-func (t *fakeTx) BumpVersion(_ context.Context, e entity.Employee) (int32, error) {
+func (t *fakeTx) BumpVersion(_ context.Context, e profiledomain.Employee) (int32, error) {
 	t.emp.Version = e.Version + 1
 	return t.emp.Version, nil
 }
 
-func (t *fakeTx) SaveName(_ context.Context, e entity.Employee) (int32, error) {
+func (t *fakeTx) SaveName(_ context.Context, e profiledomain.Employee) (int32, error) {
 	e.Version++
 	t.emp = e
 	return e.Version, nil
 }
 
-func (t *fakeTx) SavePhoto(_ context.Context, e entity.Employee) (int32, error) {
+func (t *fakeTx) SavePhoto(_ context.Context, e profiledomain.Employee) (int32, error) {
 	if t.repo.failSave != nil {
 		return 0, t.repo.failSave
 	}
@@ -98,7 +101,7 @@ type fakePhotos struct{}
 func (fakePhotos) Normalize(r io.Reader) ([]byte, error) {
 	b, _ := io.ReadAll(r)
 	if string(b) == "bad" {
-		return nil, entity.ErrPhotoFormat
+		return nil, shared.ErrPhotoFormat
 	}
 	return []byte("jpeg"), nil
 }
@@ -130,14 +133,14 @@ func contains(ids []int64, id int64) bool {
 	return false
 }
 
-func (t *fakeTx) GetForUpdate(_ context.Context, id int64) (entity.Employee, error) {
+func (t *fakeTx) GetForUpdate(_ context.Context, id int64) (profiledomain.Employee, error) {
 	if id != t.emp.ID {
-		return entity.Employee{}, entity.ErrNotFound
+		return profiledomain.Employee{}, shared.ErrNotFound
 	}
 	return t.emp, nil
 }
 
-func (t *fakeTx) SaveContact(_ context.Context, e entity.Employee, _ entity.ContactField) (int32, error) {
+func (t *fakeTx) SaveContact(_ context.Context, e profiledomain.Employee, _ profiledomain.ContactField) (int32, error) {
 	if t.repo.failSave != nil {
 		return 0, t.repo.failSave
 	}
@@ -146,7 +149,7 @@ func (t *fakeTx) SaveContact(_ context.Context, e entity.Employee, _ entity.Cont
 	return e.Version, nil
 }
 
-func (t *fakeTx) AppendChange(_ context.Context, _ int64, c entity.Change, _ entity.Actor) error {
+func (t *fakeTx) AppendChange(_ context.Context, _ int64, c historydomain.Change, _ shared.Actor) error {
 	if t.repo.failLog != nil {
 		return t.repo.failLog
 	}
@@ -158,9 +161,9 @@ func ptr(s string) *string { return &s }
 
 func newRepo() *fakeRepo {
 	return &fakeRepo{
-		emp:    entity.Employee{ID: 10, Version: 3, MobilePhone: ptr("0811111111")},
+		emp:    profiledomain.Employee{ID: 10, Version: 3, MobilePhone: ptr("0811111111")},
 		skills: []int64{1, 3},
-		catalog: []entity.Skill{
+		catalog: []skilldomain.Skill{
 			{ID: 1, Name: "Go", IsActive: true},
 			{ID: 2, Name: "React", IsActive: true},
 			{ID: 3, Name: "Flutter", IsActive: false},
@@ -169,7 +172,7 @@ func newRepo() *fakeRepo {
 	}
 }
 
-var actor = entity.Actor{UserID: 1, EmployeeID: 10, Role: entity.RoleEmployee}
+var actor = shared.Actor{UserID: 1, EmployeeID: 10, Role: shared.RoleEmployee}
 
 func TestUpdateContact(t *testing.T) {
 	ctx := context.Background()
@@ -183,7 +186,7 @@ func TestUpdateContact(t *testing.T) {
 		assert.EqualValues(t, 4, v)
 		assert.Equal(t, "0812345678", *repo.emp.MobilePhone)
 		require.Len(t, repo.logs, 1)
-		assert.Equal(t, entity.Change{Field: entity.FieldMobilePhone, Old: "0811111111", New: "0812345678"}, repo.logs[0])
+		assert.Equal(t, historydomain.Change{Field: historydomain.FieldMobilePhone, Old: "0811111111", New: "0812345678"}, repo.logs[0])
 	})
 
 	t.Run("same value bumps version without a log", func(t *testing.T) {
@@ -201,7 +204,7 @@ func TestUpdateContact(t *testing.T) {
 		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "mobile", Value: "0812345678", Version: 2,
 		})
-		assert.ErrorIs(t, err, entity.ErrConflict)
+		assert.ErrorIs(t, err, shared.ErrConflict)
 		assert.False(t, repo.committed)
 		assert.Equal(t, "0811111111", *repo.emp.MobilePhone)
 	})
@@ -211,7 +214,7 @@ func TestUpdateContact(t *testing.T) {
 		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
 			Actor: actor, Field: "first_name", Value: "Hacker", Version: 3,
 		})
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 		assert.False(t, repo.committed)
 	})
 
@@ -229,9 +232,9 @@ func TestUpdateContact(t *testing.T) {
 	t.Run("missing employee is not found", func(t *testing.T) {
 		repo := newRepo()
 		_, err := NewUsecase(Deps{Repo: repo}).UpdateContact(ctx, UpdateContactInput{
-			Actor: entity.Actor{UserID: 2, EmployeeID: 99}, Field: "email", Value: "a@example.com", Version: 1,
+			Actor: shared.Actor{UserID: 2, EmployeeID: 99}, Field: "email", Value: "a@example.com", Version: 1,
 		})
-		assert.ErrorIs(t, err, entity.ErrNotFound)
+		assert.ErrorIs(t, err, shared.ErrNotFound)
 	})
 }
 
@@ -248,7 +251,7 @@ func TestSetSkills(t *testing.T) {
 		assert.EqualValues(t, 4, v)
 		assert.Equal(t, []int64{1, 2}, repo.skills)
 		require.Len(t, repo.logs, 1)
-		assert.Equal(t, entity.Change{Field: entity.FieldSkills,
+		assert.Equal(t, historydomain.Change{Field: historydomain.FieldSkills,
 			Old: []string{"Go", "Flutter"}, New: []string{"Go", "React"}}, repo.logs[0])
 	})
 
@@ -269,14 +272,14 @@ func TestSetSkills(t *testing.T) {
 	t.Run("cannot add an inactive skill", func(t *testing.T) {
 		repo := newRepo()
 		_, err := set(repo, []int64{1, 4}, 3)
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 		assert.False(t, repo.committed)
 		assert.Equal(t, []int64{1, 3}, repo.skills)
 	})
 
 	t.Run("unknown skill id is rejected", func(t *testing.T) {
 		_, err := set(newRepo(), []int64{1, 999}, 3)
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 	})
 
 	t.Run("empty list clears all skills", func(t *testing.T) {
@@ -291,14 +294,14 @@ func TestSetSkills(t *testing.T) {
 	t.Run("stale version is a conflict", func(t *testing.T) {
 		repo := newRepo()
 		_, err := set(repo, []int64{1}, 2)
-		assert.ErrorIs(t, err, entity.ErrConflict)
+		assert.ErrorIs(t, err, shared.ErrConflict)
 		assert.Equal(t, []int64{1, 3}, repo.skills)
 	})
 
 	t.Run("duplicate ids are rejected before any DB work", func(t *testing.T) {
 		repo := newRepo()
 		_, err := set(repo, []int64{1, 1}, 3)
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 		assert.False(t, repo.committed)
 	})
 }
@@ -327,7 +330,7 @@ func TestUpdatePhoto(t *testing.T) {
 		assert.Equal(t, "new-1.jpg", *repo.emp.PhotoPath)
 		assert.Equal(t, map[string]bool{"new-1.jpg": true}, files.files)
 		require.Len(t, repo.logs, 1)
-		assert.Equal(t, entity.Change{Field: entity.FieldPhoto, Old: "old.jpg", New: "new-1.jpg"}, repo.logs[0])
+		assert.Equal(t, historydomain.Change{Field: historydomain.FieldPhoto, Old: "old.jpg", New: "new-1.jpg"}, repo.logs[0])
 	})
 
 	t.Run("first photo has nil old value", func(t *testing.T) {
@@ -340,7 +343,7 @@ func TestUpdatePhoto(t *testing.T) {
 	t.Run("stale version deletes the new file and keeps the old one", func(t *testing.T) {
 		repo, files, uc := setup(ptr("old.jpg"))
 		_, _, err := upload(uc, "png", 2)
-		assert.ErrorIs(t, err, entity.ErrConflict)
+		assert.ErrorIs(t, err, shared.ErrConflict)
 		assert.Equal(t, map[string]bool{"old.jpg": true}, files.files, "no orphan file")
 		assert.Equal(t, "old.jpg", *repo.emp.PhotoPath)
 	})
@@ -356,7 +359,7 @@ func TestUpdatePhoto(t *testing.T) {
 	t.Run("invalid image never reaches storage or the DB", func(t *testing.T) {
 		repo, files, uc := setup(nil)
 		_, _, err := upload(uc, "bad", 3)
-		assert.ErrorIs(t, err, entity.ErrPhotoFormat)
+		assert.ErrorIs(t, err, shared.ErrPhotoFormat)
 		assert.Zero(t, files.n)
 		assert.False(t, repo.committed)
 	})
@@ -364,7 +367,7 @@ func TestUpdatePhoto(t *testing.T) {
 
 func TestUpdateName(t *testing.T) {
 	ctx := context.Background()
-	admin := entity.Actor{UserID: 99, Role: entity.RoleAdmin}
+	admin := shared.Actor{UserID: 99, Role: shared.RoleAdmin}
 
 	t.Run("admin renames, each part logged", func(t *testing.T) {
 		repo := newRepo()
@@ -375,7 +378,7 @@ func TestUpdateName(t *testing.T) {
 		require.NoError(t, err)
 		assert.EqualValues(t, 4, v)
 		assert.Equal(t, "Jaidee", repo.emp.LastName)
-		assert.Equal(t, []entity.Change{{Field: entity.FieldLastName, Old: "Jaidi", New: "Jaidee"}}, repo.logs)
+		assert.Equal(t, []historydomain.Change{{Field: historydomain.FieldLastName, Old: "Jaidi", New: "Jaidee"}}, repo.logs)
 	})
 
 	t.Run("employees cannot rename, even themselves", func(t *testing.T) {
@@ -383,7 +386,7 @@ func TestUpdateName(t *testing.T) {
 		_, err := NewUsecase(Deps{Repo: repo}).UpdateName(ctx, UpdateNameInput{
 			Actor: actor, EmployeeID: actor.EmployeeID, FirstName: "X", LastName: "Y", Version: 3,
 		})
-		assert.ErrorIs(t, err, entity.ErrForbidden)
+		assert.ErrorIs(t, err, shared.ErrForbidden)
 		assert.False(t, repo.committed)
 	})
 }

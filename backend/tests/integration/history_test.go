@@ -9,8 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
 	"employee-portal/modules/history"
+	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/shared"
 )
 
 // addLog inserts a change log `ago` in the past (e.g. "8 days").
@@ -43,14 +44,14 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	addLog(t, empID, userID, "address", `null`, `"New address"`, "2 days")
 
 	uc := history.NewUsecase(history.NewRepository(appDB), 7)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	setHistoryDays(t, "7")
 	res, err := uc.ListOwn(ctx, history.ListInput{Actor: actor})
 	require.NoError(t, err)
 	assert.Equal(t, 7, res.Days)
 	require.Len(t, res.Items, 1, "the 8-day-old change is outside a 7-day window")
-	assert.Equal(t, entity.FieldAddress, res.Items[0].Field)
+	assert.Equal(t, historydomain.FieldAddress, res.Items[0].Field)
 	assert.Equal(t, "New address", res.Items[0].New)
 	assert.True(t, res.HasOlder)
 
@@ -60,7 +61,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	assert.Equal(t, 10, res.Days)
 	assert.Len(t, res.Items, 2)
 	assert.False(t, res.HasOlder)
-	assert.Equal(t, entity.FieldAddress, res.Items[0].Field, "newest first")
+	assert.Equal(t, historydomain.FieldAddress, res.Items[0].Field, "newest first")
 }
 
 func TestHistory_EmptyStates(t *testing.T) {
@@ -69,7 +70,7 @@ func TestHistory_EmptyStates(t *testing.T) {
 
 	// Never edited.
 	userID, empID, _ := newEmployee(t, "0811111111")
-	res, err := uc.ListOwn(ctx, history.ListInput{Actor: entity.Actor{UserID: userID, EmployeeID: empID}})
+	res, err := uc.ListOwn(ctx, history.ListInput{Actor: shared.Actor{UserID: userID, EmployeeID: empID}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)
 	assert.NotNil(t, res.Items)
@@ -78,7 +79,7 @@ func TestHistory_EmptyStates(t *testing.T) {
 	// Edited, but only long ago.
 	userID, empID, _ = newEmployee(t, "0811111111")
 	addLog(t, empID, userID, "address", `null`, `"Old"`, "30 days")
-	res, err = uc.ListOwn(ctx, history.ListInput{Actor: entity.Actor{UserID: userID, EmployeeID: empID}})
+	res, err = uc.ListOwn(ctx, history.ListInput{Actor: shared.Actor{UserID: userID, EmployeeID: empID}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)
 	assert.True(t, res.HasOlder)
@@ -93,13 +94,13 @@ func TestHistory_FilterPagingAndValues(t *testing.T) {
 	addLog(t, empID, userID, "address", `null`, `"A"`, "4 hours")
 
 	uc := history.NewUsecase(history.NewRepository(appDB), 7)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	res, err := uc.ListOwn(ctx, history.ListInput{Actor: actor, Field: "mobile_phone"})
 	require.NoError(t, err)
 	require.Len(t, res.Items, 2)
 	for _, it := range res.Items {
-		assert.Equal(t, entity.FieldMobilePhone, it.Field)
+		assert.Equal(t, historydomain.FieldMobilePhone, it.Field)
 	}
 
 	res, err = uc.ListOwn(ctx, history.ListInput{Actor: actor, Field: "skills"})
@@ -126,7 +127,7 @@ func TestHistory_OnlyOwnEmployee(t *testing.T) {
 	addLog(t, empB, userB, "address", `null`, `"B's address"`, "1 hour")
 
 	uc := history.NewUsecase(history.NewRepository(appDB), 7)
-	res, err := uc.ListOwn(ctx, history.ListInput{Actor: entity.Actor{UserID: userA, EmployeeID: empA}})
+	res, err := uc.ListOwn(ctx, history.ListInput{Actor: shared.Actor{UserID: userA, EmployeeID: empA}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)
 }

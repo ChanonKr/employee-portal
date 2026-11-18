@@ -3,7 +3,7 @@ package skill
 import (
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	skilldomain "employee-portal/modules/skill/domain"
 )
 
 // GORM struct for the skill catalog (see profile/model.go for the rules).
@@ -16,8 +16,8 @@ type skillModel struct {
 
 func (skillModel) TableName() string { return "skills" }
 
-func (s skillModel) toEntity() entity.Skill {
-	return entity.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
+func (s skillModel) toEntity() skilldomain.Skill {
+	return skilldomain.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
 }
 
 func displayOrder(db *gorm.DB) *gorm.DB {

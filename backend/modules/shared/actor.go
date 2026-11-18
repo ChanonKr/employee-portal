@@ -1,4 +1,11 @@
-package entity
+package shared
+
+type Role string
+
+const (
+	RoleEmployee Role = "employee"
+	RoleAdmin    Role = "admin"
+)
 
 // Actor is the authenticated user performing a request. It comes from the session
 // token, never from the URL or request body.
@@ -13,3 +20,11 @@ type Actor struct {
 func (a Actor) IsAdmin() bool { return a.Role == RoleAdmin }
 
 func (a Actor) HasProfile() bool { return a.EmployeeID != 0 }
+
+// RequireAdmin is the service-level role check (the router checks it too).
+func RequireAdmin(a Actor) error {
+	if !a.IsAdmin() {
+		return ErrForbidden
+	}
+	return nil
+}

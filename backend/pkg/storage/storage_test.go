@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 func TestLocal_SaveOpenDelete(t *testing.T) {
@@ -46,7 +46,7 @@ func TestLocal_RejectsUnsafeNames(t *testing.T) {
 	for _, name := range []string{"../../etc/passwd", "a.jpg", "", "x/../y.jpg",
 		"9f2c0000-0000-0000-0000-000000000000.png"} {
 		_, _, err := s.Open(ctx, name)
-		assert.ErrorIs(t, err, entity.ErrNotFound, name)
+		assert.ErrorIs(t, err, shared.ErrNotFound, name)
 		assert.Error(t, s.Delete(ctx, name), name)
 	}
 

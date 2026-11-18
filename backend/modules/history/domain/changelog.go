@@ -1,9 +1,13 @@
-package entity
+// Package domain holds the change history rules: which fields are logged, what a
+// change looks like and the history window. No framework imports.
+package domain
 
 import (
 	"strconv"
 	"strings"
 	"time"
+
+	"employee-portal/modules/shared"
 )
 
 // FieldName is the profile field recorded in the change history.
@@ -29,7 +33,7 @@ var fieldNames = map[FieldName]struct{}{
 func ParseFieldName(s string) (FieldName, error) {
 	f := FieldName(s)
 	if _, ok := fieldNames[f]; !ok {
-		return "", NewValidationError("field", "unknown field")
+		return "", shared.NewValidationError("field", "unknown field")
 	}
 	return f, nil
 }
@@ -45,7 +49,7 @@ type Change struct {
 type ChangeLog struct {
 	ID int64
 	Change
-	ChangedBy Actor // UserID and Role only
+	ChangedBy shared.Actor // UserID and Role only
 	ChangedAt time.Time
 }
 
@@ -56,50 +60,19 @@ const (
 	MaxHistoryDays = 365
 )
 
-// ParseHistoryDays validates the history_days setting.
+// ParseHistoryDays validates the stored history_days setting.
 func ParseHistoryDays(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil || n < MinHistoryDays || n > MaxHistoryDays {
-		return 0, NewValidationError("historyDays", "must be a whole number from 1 to 365")
+		return 0, shared.NewValidationError("historyDays", "must be a whole number from 1 to 365")
 	}
 	return n, nil
 }
-
-// ── paging
-
-const (
-	DefaultPageSize = 20
-	MaxPageSize     = 100
-)
-
-type PageRequest struct {
-	Page     int // 1-based
-	PageSize int
-}
-
-// NewPageRequest applies defaults for zero values and rejects out-of-range input.
-func NewPageRequest(page, pageSize int) (PageRequest, error) {
-	if page == 0 {
-		page = 1
-	}
-	if pageSize == 0 {
-		pageSize = DefaultPageSize
-	}
-	if page < 1 {
-		return PageRequest{}, NewValidationError("page", "must be 1 or more")
-	}
-	if pageSize < 1 || pageSize > MaxPageSize {
-		return PageRequest{}, NewValidationError("pageSize", "must be from 1 to 100")
-	}
-	return PageRequest{Page: page, PageSize: pageSize}, nil
-}
-
-func (p PageRequest) Offset() int { return (p.Page - 1) * p.PageSize }
 
 // HistoryQuery selects change logs for one employee, newest first.
 type HistoryQuery struct {
 	EmployeeID int64
 	Days       int        // 0 = no time window (admin view)
 	Field      *FieldName // nil = all fields
-	PageRequest
+	shared.PageRequest
 }

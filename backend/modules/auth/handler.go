@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
@@ -33,7 +33,7 @@ type meResponse struct {
 	UserID             int64       `json:"userId"`
 	EmployeeID         *int64      `json:"employeeId"`
 	EmployeeCode       string      `json:"employeeCode"`
-	Role               entity.Role `json:"role"`
+	Role               shared.Role `json:"role"`
 	MustChangePassword bool        `json:"mustChangePassword"`
 }
 
@@ -41,7 +41,7 @@ type meResponse struct {
 func (h *Handler) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.ErrUnauthorized)
+		httputil.WriteError(c, shared.ErrUnauthorized)
 		return
 	}
 	s, err := h.uc.Login(c.Request.Context(), req.EmployeeCode, req.Password)
@@ -81,7 +81,7 @@ type changePasswordRequest struct {
 func (h *Handler) ChangePassword(c *gin.Context) {
 	var req changePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("body", "must be JSON with currentPassword and newPassword"))
+		httputil.WriteError(c, shared.NewValidationError("body", "must be JSON with currentPassword and newPassword"))
 		return
 	}
 	s, err := h.uc.ChangePassword(c.Request.Context(), middleware.ActorFrom(c), req.CurrentPassword, req.NewPassword)
@@ -110,7 +110,7 @@ type createdAccountResponse struct {
 func (h *Handler) AdminCreateAccount(c *gin.Context) {
 	var req createAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("body", "must be JSON with employeeCode, firstName, lastName"))
+		httputil.WriteError(c, shared.NewValidationError("body", "must be JSON with employeeCode, firstName, lastName"))
 		return
 	}
 	acc, err := h.uc.CreateAccount(c.Request.Context(), middleware.ActorFrom(c), CreateAccountInput{

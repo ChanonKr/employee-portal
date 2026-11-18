@@ -5,7 +5,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 	"employee-portal/pkg/database"
 )
 
@@ -18,19 +19,19 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // ListActive returns the picker catalog.
-func (r *repository) ListActive(ctx context.Context) ([]entity.Skill, error) {
+func (r *repository) ListActive(ctx context.Context) ([]skilldomain.Skill, error) {
 	var rows []skillModel
 	if err := r.db.WithContext(ctx).Where("is_active").Scopes(displayOrder).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
 	}
-	skills := make([]entity.Skill, len(rows))
+	skills := make([]skilldomain.Skill, len(rows))
 	for i, row := range rows {
 		skills[i] = row.toEntity()
 	}
 	return skills, nil
 }
 
-func (r *repository) ListAll(ctx context.Context) ([]entity.SkillUsage, error) {
+func (r *repository) ListAll(ctx context.Context) ([]skilldomain.SkillUsage, error) {
 	var rows []struct {
 		Skill  skillModel `gorm:"embedded"` // named: GORM skips anonymous unexported types
 		UsedBy int64
@@ -44,9 +45,9 @@ func (r *repository) ListAll(ctx context.Context) ([]entity.SkillUsage, error) {
 	if err != nil {
 		return nil, database.MapError(err)
 	}
-	out := make([]entity.SkillUsage, len(rows))
+	out := make([]skilldomain.SkillUsage, len(rows))
 	for i, row := range rows {
-		out[i] = entity.SkillUsage{Skill: row.Skill.toEntity(), SortOrder: row.Skill.SortOrder, UsedBy: row.UsedBy}
+		out[i] = skilldomain.SkillUsage{Skill: row.Skill.toEntity(), SortOrder: row.Skill.SortOrder, UsedBy: row.UsedBy}
 	}
 	return out, nil
 }
@@ -80,7 +81,7 @@ func (r *repository) Update(ctx context.Context, id int64, name *string, isActiv
 			return database.MapError(err)
 		}
 		if n == 0 {
-			return entity.ErrNotFound
+			return shared.ErrNotFound
 		}
 		return nil
 	}
@@ -89,13 +90,13 @@ func (r *repository) Update(ctx context.Context, id int64, name *string, isActiv
 		return database.MapError(res.Error)
 	}
 	if res.RowsAffected == 0 {
-		return entity.ErrNotFound
+		return shared.ErrNotFound
 	}
 	return nil
 }
 
 // Reorder applies every position or none: an unknown id rolls back the transaction.
-func (r *repository) Reorder(ctx context.Context, items []entity.SkillOrder) error {
+func (r *repository) Reorder(ctx context.Context, items []skilldomain.SkillOrder) error {
 	return database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		for _, it := range items {
 			res := tx.Model(&skillModel{}).Where("id = ?", it.ID).Update("sort_order", it.SortOrder)
@@ -103,7 +104,7 @@ func (r *repository) Reorder(ctx context.Context, items []entity.SkillOrder) err
 				return database.MapError(res.Error)
 			}
 			if res.RowsAffected == 0 {
-				return entity.ErrNotFound
+				return shared.ErrNotFound
 			}
 		}
 		return nil

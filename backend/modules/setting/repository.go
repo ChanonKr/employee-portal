@@ -7,7 +7,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"employee-portal/modules/entity"
+	settingdomain "employee-portal/modules/setting/domain"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/database"
 )
 
@@ -19,7 +20,7 @@ func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
 }
 
-func (r *repository) Get(ctx context.Context, key string) (string, entity.HistorySettings, error) {
+func (r *repository) Get(ctx context.Context, key string) (string, settingdomain.HistorySettings, error) {
 	var row struct {
 		Value         string
 		UpdatedAt     time.Time
@@ -32,9 +33,9 @@ func (r *repository) Get(ctx context.Context, key string) (string, entity.Histor
 		Where("app_settings.key = ?", key).
 		Take(&row).Error
 	if err != nil {
-		return "", entity.HistorySettings{}, database.MapError(err)
+		return "", settingdomain.HistorySettings{}, database.MapError(err)
 	}
-	s := entity.HistorySettings{UpdatedByID: row.UpdatedByID, UpdatedByCode: row.UpdatedByCode}
+	s := settingdomain.HistorySettings{UpdatedByID: row.UpdatedByID, UpdatedByCode: row.UpdatedByCode}
 	if row.UpdatedByID != nil { // seed rows have no editor; their timestamp is the migration time
 		at := row.UpdatedAt
 		s.UpdatedAt = &at
@@ -42,7 +43,7 @@ func (r *repository) Get(ctx context.Context, key string) (string, entity.Histor
 	return row.Value, s, nil
 }
 
-func (r *repository) Set(ctx context.Context, key, value string, by entity.Actor) error {
+func (r *repository) Set(ctx context.Context, key, value string, by shared.Actor) error {
 	uid := by.UserID
 	s := settingModel{Key: key, Value: value, UpdatedBy: &uid}
 	// INSERT ... ON CONFLICT (key) DO UPDATE

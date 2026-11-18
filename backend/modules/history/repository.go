@@ -7,7 +7,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/database"
 )
 
@@ -28,7 +29,7 @@ func (r *repository) HistoryDays(ctx context.Context) (string, error) {
 }
 
 // List reads the log newest first. Days 0 = no time window (admin); Field nil = all fields.
-func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error) {
+func (r *repository) List(ctx context.Context, q historydomain.HistoryQuery, limit int) ([]historydomain.ChangeLog, error) {
 	db := r.db.WithContext(ctx).Table(changeLogTable).
 		Select("profile_change_logs.id, profile_change_logs.field, profile_change_logs.old_value, "+
 			"profile_change_logs.new_value, profile_change_logs.changed_at, profile_change_logs.changed_by, "+
@@ -50,7 +51,7 @@ func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int)
 		return nil, database.MapError(err)
 	}
 
-	logs := make([]entity.ChangeLog, len(rows))
+	logs := make([]historydomain.ChangeLog, len(rows))
 	for i, row := range rows {
 		oldV, err := decode(row.OldValue)
 		if err != nil {
@@ -60,10 +61,10 @@ func (r *repository) List(ctx context.Context, q entity.HistoryQuery, limit int)
 		if err != nil {
 			return nil, err
 		}
-		logs[i] = entity.ChangeLog{
+		logs[i] = historydomain.ChangeLog{
 			ID:        row.ID,
-			Change:    entity.Change{Field: entity.FieldName(row.Field), Old: oldV, New: newV},
-			ChangedBy: entity.Actor{UserID: row.ChangedBy, Role: entity.Role(row.ChangedByRole)},
+			Change:    historydomain.Change{Field: historydomain.FieldName(row.Field), Old: oldV, New: newV},
+			ChangedBy: shared.Actor{UserID: row.ChangedBy, Role: shared.Role(row.ChangedByRole)},
 			ChangedAt: row.ChangedAt,
 		}
 	}

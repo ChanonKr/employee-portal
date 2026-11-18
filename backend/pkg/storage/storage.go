@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 // Stored names are generated here (UUID + extension), never taken from the client,
@@ -74,11 +74,11 @@ func (l *Local) Delete(_ context.Context, name string) error {
 // Open returns the file for reading. Unknown or malformed names are ErrNotFound.
 func (l *Local) Open(_ context.Context, name string) (io.ReadSeekCloser, time.Time, error) {
 	if !validName.MatchString(name) {
-		return nil, time.Time{}, entity.ErrNotFound
+		return nil, time.Time{}, shared.ErrNotFound
 	}
 	f, err := os.Open(filepath.Join(l.dir, name))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, time.Time{}, entity.ErrNotFound
+		return nil, time.Time{}, shared.ErrNotFound
 	}
 	if err != nil {
 		return nil, time.Time{}, err

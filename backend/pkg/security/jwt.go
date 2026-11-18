@@ -8,12 +8,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 type claims struct {
 	EmployeeID         int64       `json:"emp,omitempty"`
-	Role               entity.Role `json:"role"`
+	Role               shared.Role `json:"role"`
 	MustChangePassword bool        `json:"mcp,omitempty"`
 	jwt.RegisteredClaims
 }
@@ -30,7 +30,7 @@ func NewTokenManager(secret string, ttl time.Duration) *TokenManager {
 
 func (m *TokenManager) TTL() time.Duration { return m.ttl }
 
-func (m *TokenManager) Issue(a entity.Actor) (string, time.Time, error) {
+func (m *TokenManager) Issue(a shared.Actor) (string, time.Time, error) {
 	now := m.now()
 	exp := now.Add(m.ttl)
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
@@ -50,7 +50,7 @@ func (m *TokenManager) Issue(a entity.Actor) (string, time.Time, error) {
 	return s, exp, nil
 }
 
-func (m *TokenManager) Parse(token string) (entity.Actor, error) {
+func (m *TokenManager) Parse(token string) (shared.Actor, error) {
 	var c claims
 	_, err := jwt.ParseWithClaims(token, &c, func(*jwt.Token) (any, error) { return m.secret, nil },
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
@@ -58,14 +58,14 @@ func (m *TokenManager) Parse(token string) (entity.Actor, error) {
 		jwt.WithTimeFunc(m.now),
 	)
 	if err != nil {
-		return entity.Actor{}, entity.ErrUnauthorized
+		return shared.Actor{}, shared.ErrUnauthorized
 	}
 	uid, err := strconv.ParseInt(c.Subject, 10, 64)
 	if err != nil || uid <= 0 {
-		return entity.Actor{}, entity.ErrUnauthorized
+		return shared.Actor{}, shared.ErrUnauthorized
 	}
-	if c.Role != entity.RoleEmployee && c.Role != entity.RoleAdmin {
-		return entity.Actor{}, errors.Join(entity.ErrUnauthorized, errors.New("unknown role"))
+	if c.Role != shared.RoleEmployee && c.Role != shared.RoleAdmin {
+		return shared.Actor{}, errors.Join(shared.ErrUnauthorized, errors.New("unknown role"))
 	}
-	return entity.Actor{UserID: uid, EmployeeID: c.EmployeeID, Role: c.Role, MustChangePassword: c.MustChangePassword}, nil
+	return shared.Actor{UserID: uid, EmployeeID: c.EmployeeID, Role: c.Role, MustChangePassword: c.MustChangePassword}, nil
 }

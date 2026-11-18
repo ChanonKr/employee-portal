@@ -7,14 +7,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
+	authdomain "employee-portal/modules/auth/domain"
+	"employee-portal/modules/shared"
 )
 
 const testSecret = "0123456789abcdef0123456789abcdef"
 
 func TestTokenManager_RoundTrip(t *testing.T) {
 	m := NewTokenManager(testSecret, time.Hour)
-	want := entity.Actor{UserID: 5, EmployeeID: 9, Role: entity.RoleAdmin, MustChangePassword: true}
+	want := shared.Actor{UserID: 5, EmployeeID: 9, Role: shared.RoleAdmin, MustChangePassword: true}
 
 	tok, exp, err := m.Issue(want)
 	require.NoError(t, err)
@@ -27,25 +28,25 @@ func TestTokenManager_RoundTrip(t *testing.T) {
 
 func TestTokenManager_Rejects(t *testing.T) {
 	m := NewTokenManager(testSecret, time.Hour)
-	tok, _, err := m.Issue(entity.Actor{UserID: 1, Role: entity.RoleEmployee})
+	tok, _, err := m.Issue(shared.Actor{UserID: 1, Role: shared.RoleEmployee})
 	require.NoError(t, err)
 
 	t.Run("wrong secret", func(t *testing.T) {
 		other := NewTokenManager("ffffffffffffffffffffffffffffffff", time.Hour)
 		_, err := other.Parse(tok)
-		assert.ErrorIs(t, err, entity.ErrUnauthorized)
+		assert.ErrorIs(t, err, shared.ErrUnauthorized)
 	})
 
 	t.Run("expired", func(t *testing.T) {
 		late := NewTokenManager(testSecret, time.Hour)
 		late.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
 		_, err := late.Parse(tok)
-		assert.ErrorIs(t, err, entity.ErrUnauthorized)
+		assert.ErrorIs(t, err, shared.ErrUnauthorized)
 	})
 
 	t.Run("garbage", func(t *testing.T) {
 		_, err := m.Parse("not-a-token")
-		assert.ErrorIs(t, err, entity.ErrUnauthorized)
+		assert.ErrorIs(t, err, shared.ErrUnauthorized)
 	})
 }
 
@@ -62,7 +63,7 @@ func TestTempPassword(t *testing.T) {
 		p, err := TempPassword()
 		require.NoError(t, err)
 		assert.Len(t, p, 12)
-		assert.NoError(t, entity.ValidateNewPassword("p", p), p)
+		assert.NoError(t, authdomain.ValidateNewPassword("p", p), p)
 		assert.NotContains(t, p, "0")
 		assert.NotContains(t, p, "l")
 		seen[p] = true

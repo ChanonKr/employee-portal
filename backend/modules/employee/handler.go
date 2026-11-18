@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
@@ -25,7 +25,7 @@ type summaryDTO struct {
 	FirstName    string      `json:"firstName"`
 	LastName     string      `json:"lastName"`
 	PhotoURL     *string     `json:"photoUrl"`
-	Role         entity.Role `json:"role"`
+	Role         shared.Role `json:"role"`
 	IsActive     bool        `json:"isActive"`
 }
 
@@ -54,7 +54,7 @@ type detailResponse struct {
 	Contact      contactDTO  `json:"contact"`
 	Skills       []skillDTO  `json:"skills"`
 	Version      int32       `json:"version"`
-	Role         entity.Role `json:"role"`
+	Role         shared.Role `json:"role"`
 	IsActive     bool        `json:"isActive"`
 }
 
@@ -84,7 +84,7 @@ type recentDTO struct {
 	Name          string      `json:"name"`
 	Field         string      `json:"field"`
 	ChangedAt     time.Time   `json:"changedAt"`
-	ChangedByRole entity.Role `json:"changedByRole"`
+	ChangedByRole shared.Role `json:"changedByRole"`
 }
 
 // List: GET /admin/employees?q=&page=&pageSize=

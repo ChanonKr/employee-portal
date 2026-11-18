@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 // PostgreSQL error codes, see https://www.postgresql.org/docs/17/errcodes-appendix.html
@@ -23,17 +23,17 @@ func MapError(err error) error {
 		return nil
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return entity.ErrNotFound
+		return shared.ErrNotFound
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case codeUniqueViolation:
-			return fmt.Errorf("%w: %s", entity.ErrDuplicate, pgErr.ConstraintName)
+			return fmt.Errorf("%w: %s", shared.ErrDuplicate, pgErr.ConstraintName)
 		case codeCheckViolation:
-			return entity.NewValidationError(pgErr.ConstraintName, "violates a data rule")
+			return shared.NewValidationError(pgErr.ConstraintName, "violates a data rule")
 		case codeForeignKeyViolation:
-			return entity.NewValidationError(pgErr.ConstraintName, "references a missing record")
+			return shared.NewValidationError(pgErr.ConstraintName, "references a missing record")
 		}
 	}
 	return fmt.Errorf("database: %w", err)

@@ -10,15 +10,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
 	"employee-portal/modules/profile"
+	"employee-portal/modules/shared"
 )
 
 func TestUpdateContact_WritesValueAndLogTogether(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
 	uc := newProfileUsecase(t)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	v, err := uc.UpdateContact(ctx, profile.UpdateContactInput{Actor: actor, Field: "mobile", Value: "0812345678", Version: 1})
 	require.NoError(t, err)
@@ -42,7 +42,7 @@ func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
 	uc := newProfileUsecase(t)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	const n = 5
 	errs := make([]error, n)
@@ -66,7 +66,7 @@ func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 		switch {
 		case err == nil:
 			ok++
-		case assert.ErrorIs(t, err, entity.ErrConflict):
+		case assert.ErrorIs(t, err, shared.ErrConflict):
 			conflict++
 		}
 	}
@@ -81,7 +81,7 @@ func TestUpdateContact_LogFailureRollsBackUpdate(t *testing.T) {
 	uc := newProfileUsecase(t)
 
 	// changed_by references a user that does not exist → the log insert fails (FK).
-	ghost := entity.Actor{UserID: 999_999_999, EmployeeID: empID}
+	ghost := shared.Actor{UserID: 999_999_999, EmployeeID: empID}
 	_, err := uc.UpdateContact(ctx, profile.UpdateContactInput{Actor: ghost, Field: "mobile", Value: "0899999999", Version: 1})
 	require.Error(t, err)
 

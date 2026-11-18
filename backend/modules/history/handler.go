@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
@@ -21,7 +21,7 @@ func NewHandler(uc Usecase) *Handler {
 
 type changedByDTO struct {
 	ID   int64       `json:"id"`
-	Role entity.Role `json:"role"`
+	Role shared.Role `json:"role"`
 }
 
 type itemDTO struct {

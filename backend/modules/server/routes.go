@@ -9,11 +9,11 @@ import (
 
 	"employee-portal/modules/auth"
 	"employee-portal/modules/employee"
-	"employee-portal/modules/entity"
 	"employee-portal/modules/file"
 	"employee-portal/modules/history"
 	"employee-portal/modules/profile"
 	"employee-portal/modules/setting"
+	"employee-portal/modules/shared"
 	"employee-portal/modules/skill"
 	"employee-portal/pkg/database"
 	"employee-portal/pkg/imaging"
@@ -34,7 +34,7 @@ func (s *Server) routes() {
 	r := router.Groups{
 		Root:     &s.engine.RouterGroup,
 		API:      api,
-		Admin:    api.Group("/admin", signedIn, ready, middleware.RequireRole(entity.RoleAdmin)), // use cases check again
+		Admin:    api.Group("/admin", signedIn, ready, middleware.RequireRole(shared.RoleAdmin)), // use cases check again
 		SignedIn: signedIn,
 		Ready:    ready,
 	}

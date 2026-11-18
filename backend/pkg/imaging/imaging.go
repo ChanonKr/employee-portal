@@ -14,7 +14,7 @@ import (
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp" // register decoder
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 const (
@@ -47,26 +47,26 @@ func (p *Processor) Normalize(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > p.maxBytes {
-		return nil, entity.ErrPhotoTooLarge
+		return nil, shared.ErrPhotoTooLarge
 	}
 	if _, ok := allowedTypes[http.DetectContentType(data)]; !ok {
-		return nil, entity.ErrPhotoFormat
+		return nil, shared.ErrPhotoFormat
 	}
 
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, entity.NewValidationError("file", "image could not be read")
+		return nil, shared.NewValidationError("file", "image could not be read")
 	}
 	if cfg.Width*cfg.Height > maxPixels {
-		return nil, entity.ErrPhotoTooLarge
+		return nil, shared.ErrPhotoTooLarge
 	}
 
 	img, err := imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
 	if err != nil {
-		return nil, entity.NewValidationError("file", "image could not be read")
+		return nil, shared.NewValidationError("file", "image could not be read")
 	}
 
-	fitted := imaging.Fit(img, entity.MaxPhotoSide, entity.MaxPhotoSide, imaging.Lanczos)
+	fitted := imaging.Fit(img, shared.MaxPhotoSide, shared.MaxPhotoSide, imaging.Lanczos)
 	// JPEG has no transparency: flatten onto white instead of black.
 	b := fitted.Bounds()
 	flat := imaging.Overlay(imaging.New(b.Dx(), b.Dy(), color.White), fitted, image.Pt(0, 0), 1)

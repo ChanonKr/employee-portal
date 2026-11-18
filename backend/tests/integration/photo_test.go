@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
 	"employee-portal/modules/profile"
+	"employee-portal/modules/shared"
 )
 
 func testPNG(t *testing.T, w, h int) []byte {
@@ -43,7 +43,7 @@ func TestUpdatePhoto_ReplacesFileAndLogs(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
 	uc, dir := newProfileUsecaseWithDir(t)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	v, first, err := uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{Actor: actor, File: bytes.NewReader(testPNG(t, 1200, 800)), Version: 1})
 	require.NoError(t, err)
@@ -72,14 +72,14 @@ func TestUpdatePhoto_FailureLeavesNoOrphanFile(t *testing.T) {
 
 	// Stale version → conflict after the file was saved.
 	_, _, err := uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{
-		Actor: entity.Actor{UserID: 1, EmployeeID: empID}, File: bytes.NewReader(testPNG(t, 10, 10)), Version: 99,
+		Actor: shared.Actor{UserID: 1, EmployeeID: empID}, File: bytes.NewReader(testPNG(t, 10, 10)), Version: 99,
 	})
-	assert.ErrorIs(t, err, entity.ErrConflict)
+	assert.ErrorIs(t, err, shared.ErrConflict)
 	assert.Empty(t, filesIn(t, dir))
 
 	// Log insert fails (unknown changed_by) → DB rolls back and the file is deleted.
 	_, _, err = uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{
-		Actor: entity.Actor{UserID: 999_999_999, EmployeeID: empID}, File: bytes.NewReader(testPNG(t, 10, 10)), Version: 1,
+		Actor: shared.Actor{UserID: 999_999_999, EmployeeID: empID}, File: bytes.NewReader(testPNG(t, 10, 10)), Version: 1,
 	})
 	require.Error(t, err)
 	assert.Empty(t, filesIn(t, dir))
@@ -93,9 +93,9 @@ func TestUpdatePhoto_RejectsNonImage(t *testing.T) {
 	_, empID, _ := newEmployee(t, "0811111111")
 	uc, dir := newProfileUsecaseWithDir(t)
 	_, _, err := uc.UpdatePhoto(context.Background(), profile.UpdatePhotoInput{
-		Actor: entity.Actor{UserID: 1, EmployeeID: empID}, File: bytes.NewReader([]byte("not an image, renamed to .jpg")), Version: 1,
+		Actor: shared.Actor{UserID: 1, EmployeeID: empID}, File: bytes.NewReader([]byte("not an image, renamed to .jpg")), Version: 1,
 	})
-	assert.ErrorIs(t, err, entity.ErrPhotoFormat)
+	assert.ErrorIs(t, err, shared.ErrPhotoFormat)
 	assert.Empty(t, filesIn(t, dir))
 }
 

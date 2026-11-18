@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 // RequestIDKey is the gin.Context key set by the request-id middleware.
@@ -43,7 +43,7 @@ func Abort(c *gin.Context, status int, code, message string) {
 }
 
 func classify(err error) (int, ErrorBody) {
-	var ve *entity.ValidationError
+	var ve *shared.ValidationError
 	switch {
 	case errors.As(err, &ve):
 		return http.StatusBadRequest, ErrorBody{Code: "VALIDATION_ERROR", Message: "Some fields are invalid.", Fields: ve.Fields}
@@ -51,21 +51,21 @@ func classify(err error) (int, ErrorBody) {
 		return http.StatusPreconditionRequired, ErrorBody{Code: "PRECONDITION_REQUIRED", Message: "If-Match header with the current version is required."}
 	case errors.Is(err, ErrInvalidIfMatch):
 		return http.StatusBadRequest, ErrorBody{Code: "VALIDATION_ERROR", Message: "If-Match header is invalid.", Fields: map[string]string{"If-Match": "must be a quoted version number"}}
-	case errors.Is(err, entity.ErrUnauthorized):
+	case errors.Is(err, shared.ErrUnauthorized):
 		return http.StatusUnauthorized, ErrorBody{Code: "UNAUTHORIZED", Message: "Please sign in."}
-	case errors.Is(err, entity.ErrPasswordChangeRequired):
+	case errors.Is(err, shared.ErrPasswordChangeRequired):
 		return http.StatusForbidden, ErrorBody{Code: "PASSWORD_CHANGE_REQUIRED", Message: "Please set a new password before continuing."}
-	case errors.Is(err, entity.ErrForbidden):
+	case errors.Is(err, shared.ErrForbidden):
 		return http.StatusForbidden, ErrorBody{Code: "FORBIDDEN", Message: "You do not have access to this resource."}
-	case errors.Is(err, entity.ErrNotFound):
+	case errors.Is(err, shared.ErrNotFound):
 		return http.StatusNotFound, ErrorBody{Code: "NOT_FOUND", Message: "Not found."}
-	case errors.Is(err, entity.ErrPhotoTooLarge):
+	case errors.Is(err, shared.ErrPhotoTooLarge):
 		return http.StatusRequestEntityTooLarge, ErrorBody{Code: "PAYLOAD_TOO_LARGE", Message: "Photo must be at most 5 MB."}
-	case errors.Is(err, entity.ErrPhotoFormat):
+	case errors.Is(err, shared.ErrPhotoFormat):
 		return http.StatusUnsupportedMediaType, ErrorBody{Code: "UNSUPPORTED_MEDIA_TYPE", Message: "Photo must be a JPEG, PNG or WebP image."}
-	case errors.Is(err, entity.ErrDuplicate):
+	case errors.Is(err, shared.ErrDuplicate):
 		return http.StatusConflict, ErrorBody{Code: "ALREADY_EXISTS", Message: "This name is already in use."}
-	case errors.Is(err, entity.ErrConflict):
+	case errors.Is(err, shared.ErrConflict):
 		return http.StatusConflict, ErrorBody{Code: "VERSION_CONFLICT", Message: "Profile was updated elsewhere. Please reload."}
 	default:
 		return http.StatusInternalServerError, ErrorBody{Code: "INTERNAL_ERROR", Message: "Something went wrong. Please try again."}

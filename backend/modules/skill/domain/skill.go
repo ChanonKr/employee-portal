@@ -1,9 +1,12 @@
-package entity
+// Package domain holds the skill catalog rules. No framework imports.
+package domain
 
 import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"employee-portal/modules/shared"
 )
 
 // MaxSkills is the most skills one employee can select.
@@ -19,25 +22,25 @@ type Skill struct {
 // An empty list is valid (it clears all skills).
 func ValidateSkillIDs(ids []int64) error {
 	if len(ids) > MaxSkills {
-		return NewValidationError("skillIds", fmt.Sprintf("must contain at most %d skills", MaxSkills))
+		return shared.NewValidationError("skillIds", fmt.Sprintf("must contain at most %d skills", MaxSkills))
 	}
 	seen := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
 		if id <= 0 {
-			return NewValidationError("skillIds", "must contain valid skill ids")
+			return shared.NewValidationError("skillIds", "must contain valid skill ids")
 		}
 		if _, dup := seen[id]; dup {
-			return NewValidationError("skillIds", "must not contain duplicates")
+			return shared.NewValidationError("skillIds", "must not contain duplicates")
 		}
 		seen[id] = struct{}{}
 	}
 	return nil
 }
 
-// checkSkillSelection verifies the requested ids against the skills found in the
+// CheckSelection verifies the requested ids against the skills found in the
 // catalog. Every id must exist. An inactive skill is allowed only if the employee
 // already has it, so turning a skill off never forces anyone to lose it.
-func checkSkillSelection(requested []int64, found, current []Skill) error {
+func CheckSelection(requested []int64, found, current []Skill) error {
 	byID := make(map[int64]Skill, len(found))
 	for _, s := range found {
 		byID[s.ID] = s
@@ -49,25 +52,17 @@ func checkSkillSelection(requested []int64, found, current []Skill) error {
 	for _, id := range requested {
 		s, ok := byID[id]
 		if !ok {
-			return NewValidationError("skillIds", fmt.Sprintf("skill %d does not exist", id))
+			return shared.NewValidationError("skillIds", fmt.Sprintf("skill %d does not exist", id))
 		}
 		if _, has := owned[id]; !s.IsActive && !has {
-			return NewValidationError("skillIds", fmt.Sprintf("%s is no longer available", s.Name))
+			return shared.NewValidationError("skillIds", fmt.Sprintf("%s is no longer available", s.Name))
 		}
 	}
 	return nil
 }
 
-// skillsChange returns the history entry for replacing old with next, or nil when
-// both contain the same skills (order does not matter).
-func skillsChange(old, next []Skill) *Change {
-	if sameSkillSet(old, next) {
-		return nil
-	}
-	return &Change{Field: FieldSkills, Old: skillNames(old), New: skillNames(next)}
-}
-
-func sameSkillSet(a, b []Skill) bool {
+// SameSet reports whether a and b contain the same skills (order does not matter).
+func SameSet(a, b []Skill) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -83,8 +78,8 @@ func sameSkillSet(a, b []Skill) bool {
 	return true
 }
 
-// skillNames is never nil, so an empty set is stored as [] rather than null.
-func skillNames(skills []Skill) []string {
+// Names is never nil, so an empty set is stored as [] rather than null.
+func Names(skills []Skill) []string {
 	names := make([]string, len(skills))
 	for i, s := range skills {
 		names[i] = s.Name
@@ -100,10 +95,10 @@ func NormalizeSkillName(raw string) (string, error) {
 	name := strings.Join(strings.Fields(raw), " ")
 	n := utf8.RuneCountInString(name)
 	if n == 0 {
-		return "", NewValidationError("name", "is required")
+		return "", shared.NewValidationError("name", "is required")
 	}
 	if n > maxSkillNameLength {
-		return "", NewValidationError("name", "must be at most 50 characters")
+		return "", shared.NewValidationError("name", "must be at most 50 characters")
 	}
 	return name, nil
 }
@@ -123,15 +118,15 @@ type SkillOrder struct {
 
 func ValidateSkillOrder(items []SkillOrder) error {
 	if len(items) == 0 {
-		return NewValidationError("order", "must not be empty")
+		return shared.NewValidationError("order", "must not be empty")
 	}
 	seen := make(map[int64]struct{}, len(items))
 	for _, it := range items {
 		if it.ID <= 0 || it.SortOrder < 0 {
-			return NewValidationError("order", "ids must be positive and sortOrder 0 or more")
+			return shared.NewValidationError("order", "ids must be positive and sortOrder 0 or more")
 		}
 		if _, dup := seen[it.ID]; dup {
-			return NewValidationError("order", "must not contain duplicate ids")
+			return shared.NewValidationError("order", "must not contain duplicate ids")
 		}
 		seen[it.ID] = struct{}{}
 	}

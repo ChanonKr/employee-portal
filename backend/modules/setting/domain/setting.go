@@ -1,6 +1,12 @@
-package entity
+// Package domain holds the app settings rules. No framework imports.
+package domain
 
-import "time"
+import (
+	"time"
+
+	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/shared"
+)
 
 // HistorySettings is the admin view of the history window.
 type HistorySettings struct {
@@ -12,16 +18,8 @@ type HistorySettings struct {
 
 // ValidateHistoryDays checks a value entered by an admin.
 func ValidateHistoryDays(days int) error {
-	if days < MinHistoryDays || days > MaxHistoryDays {
-		return NewValidationError("value", "must be from 1 to 365 days")
-	}
-	return nil
-}
-
-// RequireAdmin is the use-case-level role check (the router checks it too).
-func RequireAdmin(a Actor) error {
-	if !a.IsAdmin() {
-		return ErrForbidden
+	if days < historydomain.MinHistoryDays || days > historydomain.MaxHistoryDays {
+		return shared.NewValidationError("value", "must be from 1 to 365 days")
 	}
 	return nil
 }

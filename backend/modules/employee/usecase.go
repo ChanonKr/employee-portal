@@ -6,7 +6,8 @@ package employee
 import (
 	"context"
 
-	"employee-portal/modules/entity"
+	employeedomain "employee-portal/modules/employee/domain"
+	"employee-portal/modules/shared"
 )
 
 const (
@@ -21,8 +22,8 @@ type ListInput struct {
 }
 
 type ListResult struct {
-	Items []entity.EmployeeSummary
-	Page  entity.PageRequest
+	Items []employeedomain.EmployeeSummary
+	Page  shared.PageRequest
 	Total int64
 }
 
@@ -34,31 +35,31 @@ func NewUsecase(repo Repository) Usecase {
 	return &usecase{repo: repo}
 }
 
-func (u *usecase) List(ctx context.Context, actor entity.Actor, in ListInput) (ListResult, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) List(ctx context.Context, actor shared.Actor, in ListInput) (ListResult, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return ListResult{}, err
 	}
-	page, err := entity.NewPageRequest(in.Page, in.PageSize)
+	page, err := shared.NewPageRequest(in.Page, in.PageSize)
 	if err != nil {
 		return ListResult{}, err
 	}
-	items, total, err := u.repo.List(ctx, entity.EmployeeQuery{Search: in.Search, PageRequest: page})
+	items, total, err := u.repo.List(ctx, employeedomain.EmployeeQuery{Search: in.Search, PageRequest: page})
 	if err != nil {
 		return ListResult{}, err
 	}
 	return ListResult{Items: items, Page: page, Total: total}, nil
 }
 
-func (u *usecase) Get(ctx context.Context, actor entity.Actor, id int64) (entity.EmployeeDetail, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
-		return entity.EmployeeDetail{}, err
+func (u *usecase) Get(ctx context.Context, actor shared.Actor, id int64) (employeedomain.EmployeeDetail, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
+		return employeedomain.EmployeeDetail{}, err
 	}
 	return u.repo.Get(ctx, id)
 }
 
-func (u *usecase) Stats(ctx context.Context, actor entity.Actor) (entity.DashboardStats, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
-		return entity.DashboardStats{}, err
+func (u *usecase) Stats(ctx context.Context, actor shared.Actor) (employeedomain.DashboardStats, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
+		return employeedomain.DashboardStats{}, err
 	}
 	return u.repo.Stats(ctx, topSkillsLimit, recentChangesLimit)
 }

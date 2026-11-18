@@ -5,7 +5,11 @@ import (
 
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	employeedomain "employee-portal/modules/employee/domain"
+	historydomain "employee-portal/modules/history/domain"
+	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 	"employee-portal/pkg/database"
 )
 
@@ -22,7 +26,7 @@ func withUser(db *gorm.DB) *gorm.DB {
 	return db.Table("employees").Joins("JOIN users ON users.id = employees.user_id")
 }
 
-// matching filters by code or full name. The pattern is escaped in entity.LikePattern.
+// matching filters by code or full name. The pattern is escaped in EmployeeQuery.LikePattern.
 func matching(pattern *string) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		if pattern == nil {
@@ -33,7 +37,7 @@ func matching(pattern *string) func(*gorm.DB) *gorm.DB {
 	}
 }
 
-func (r *repository) List(ctx context.Context, q entity.EmployeeQuery) ([]entity.EmployeeSummary, int64, error) {
+func (r *repository) List(ctx context.Context, q employeedomain.EmployeeQuery) ([]employeedomain.EmployeeSummary, int64, error) {
 	db := r.db.WithContext(ctx)
 	filter := matching(q.LikePattern())
 
@@ -52,17 +56,17 @@ func (r *repository) List(ctx context.Context, q entity.EmployeeQuery) ([]entity
 		return nil, 0, database.MapError(err)
 	}
 
-	items := make([]entity.EmployeeSummary, len(rows))
+	items := make([]employeedomain.EmployeeSummary, len(rows))
 	for i, row := range rows {
-		items[i] = entity.EmployeeSummary{
+		items[i] = employeedomain.EmployeeSummary{
 			ID: row.ID, EmployeeCode: row.EmployeeCode, FirstName: row.FirstName, LastName: row.LastName,
-			PhotoPath: row.PhotoPath, Role: entity.Role(row.Role), IsActive: row.IsActive,
+			PhotoPath: row.PhotoPath, Role: shared.Role(row.Role), IsActive: row.IsActive,
 		}
 	}
 	return items, total, nil
 }
 
-func (r *repository) Get(ctx context.Context, id int64) (entity.EmployeeDetail, error) {
+func (r *repository) Get(ctx context.Context, id int64) (employeedomain.EmployeeDetail, error) {
 	db := r.db.WithContext(ctx)
 	var row detailRow
 	err := db.Scopes(withUser).
@@ -70,7 +74,7 @@ func (r *repository) Get(ctx context.Context, id int64) (entity.EmployeeDetail, 
 		Where("employees.id = ?", id).
 		Take(&row).Error
 	if err != nil {
-		return entity.EmployeeDetail{}, database.MapError(err)
+		return employeedomain.EmployeeDetail{}, database.MapError(err)
 	}
 	var skills []skillRow
 	err = db.Table("skills").Select("skills.id, skills.name, skills.is_active").
@@ -79,28 +83,28 @@ func (r *repository) Get(ctx context.Context, id int64) (entity.EmployeeDetail, 
 		Order("skills.sort_order").Order("skills.name").
 		Find(&skills).Error
 	if err != nil {
-		return entity.EmployeeDetail{}, database.MapError(err)
+		return employeedomain.EmployeeDetail{}, database.MapError(err)
 	}
-	d := entity.EmployeeDetail{
-		Profile: entity.Profile{
-			Employee: entity.Employee{
+	d := employeedomain.EmployeeDetail{
+		Profile: profiledomain.Profile{
+			Employee: profiledomain.Employee{
 				ID: row.ID, UserID: row.UserID, FirstName: row.FirstName, LastName: row.LastName,
 				PhotoPath: row.PhotoPath, MobilePhone: row.MobilePhone, ContactEmail: row.ContactEmail,
 				Address: row.Address, Version: row.Version,
 			},
 			EmployeeCode: row.EmployeeCode,
-			Skills:       make([]entity.Skill, len(skills)),
+			Skills:       make([]skilldomain.Skill, len(skills)),
 		},
-		Role:     entity.Role(row.Role),
+		Role:     shared.Role(row.Role),
 		IsActive: row.IsActive,
 	}
 	for i, s := range skills {
-		d.Skills[i] = entity.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
+		d.Skills[i] = skilldomain.Skill{ID: s.ID, Name: s.Name, IsActive: s.IsActive}
 	}
 	return d, nil
 }
 
-func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (entity.DashboardStats, error) {
+func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (employeedomain.DashboardStats, error) {
 	db := r.db.WithContext(ctx)
 
 	// "Complete" matches the profile checklist: photo, all contact fields, at least one skill.
@@ -112,7 +116,7 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		    AND EXISTS (SELECT 1 FROM employee_skills es WHERE es.employee_id = employees.id)
 		) AS complete`).Take(&counts).Error
 	if err != nil {
-		return entity.DashboardStats{}, database.MapError(err)
+		return employeedomain.DashboardStats{}, database.MapError(err)
 	}
 
 	var top []topSkillRow
@@ -124,7 +128,7 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		Limit(topSkills).
 		Find(&top).Error
 	if err != nil {
-		return entity.DashboardStats{}, database.MapError(err)
+		return employeedomain.DashboardStats{}, database.MapError(err)
 	}
 
 	var recent []recentChangeRow
@@ -138,23 +142,23 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		Limit(recentChanges).
 		Find(&recent).Error
 	if err != nil {
-		return entity.DashboardStats{}, database.MapError(err)
+		return employeedomain.DashboardStats{}, database.MapError(err)
 	}
 
-	s := entity.DashboardStats{
+	s := employeedomain.DashboardStats{
 		Employees:        counts.Total,
 		CompleteProfiles: counts.Complete,
-		TopSkills:        make([]entity.SkillCount, len(top)),
-		RecentChanges:    make([]entity.RecentChange, len(recent)),
+		TopSkills:        make([]employeedomain.SkillCount, len(top)),
+		RecentChanges:    make([]employeedomain.RecentChange, len(recent)),
 	}
 	for i, t := range top {
-		s.TopSkills[i] = entity.SkillCount{Skill: entity.Skill{ID: t.ID, Name: t.Name}, UsedBy: t.UsedBy}
+		s.TopSkills[i] = employeedomain.SkillCount{Skill: skilldomain.Skill{ID: t.ID, Name: t.Name}, UsedBy: t.UsedBy}
 	}
 	for i, c := range recent {
-		s.RecentChanges[i] = entity.RecentChange{
+		s.RecentChanges[i] = employeedomain.RecentChange{
 			ID: c.ID, EmployeeID: c.EmployeeID, EmployeeCode: c.EmployeeCode,
-			FirstName: c.FirstName, LastName: c.LastName, Field: entity.FieldName(c.Field),
-			ChangedAt: c.ChangedAt, ChangedByRole: entity.Role(c.ChangedByRole),
+			FirstName: c.FirstName, LastName: c.LastName, Field: historydomain.FieldName(c.Field),
+			ChangedAt: c.ChangedAt, ChangedByRole: shared.Role(c.ChangedByRole),
 		}
 	}
 	return s, nil

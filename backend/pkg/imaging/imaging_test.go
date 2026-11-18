@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 )
 
 func pngBytes(t *testing.T, w, h int) []byte {
@@ -52,25 +52,25 @@ func TestNormalize_Rejects(t *testing.T) {
 
 	t.Run("text renamed to .jpg", func(t *testing.T) {
 		_, err := p.Normalize(bytes.NewReader([]byte("hello, this is not an image")))
-		assert.ErrorIs(t, err, entity.ErrPhotoFormat)
+		assert.ErrorIs(t, err, shared.ErrPhotoFormat)
 	})
 	t.Run("gif is not allowed", func(t *testing.T) {
 		_, err := p.Normalize(bytes.NewReader([]byte("GIF89a\x01\x00\x01\x00\x00\x00\x00;")))
-		assert.ErrorIs(t, err, entity.ErrPhotoFormat)
+		assert.ErrorIs(t, err, shared.ErrPhotoFormat)
 	})
 	t.Run("over the byte limit", func(t *testing.T) {
 		_, err := NewProcessor(100).Normalize(bytes.NewReader(pngBytes(t, 200, 200)))
-		assert.ErrorIs(t, err, entity.ErrPhotoTooLarge)
+		assert.ErrorIs(t, err, shared.ErrPhotoTooLarge)
 	})
 	t.Run("truncated png", func(t *testing.T) {
 		data := pngBytes(t, 50, 50)
 		_, err := p.Normalize(bytes.NewReader(data[:40]))
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 	})
 	t.Run("decompression bomb header", func(t *testing.T) {
 		// A tiny file whose PNG header claims 10000×10000 pixels.
 		_, err := p.Normalize(bytes.NewReader(pngHeaderOnly(10000, 10000)))
-		assert.ErrorIs(t, err, entity.ErrPhotoTooLarge)
+		assert.ErrorIs(t, err, shared.ErrPhotoTooLarge)
 	})
 }
 

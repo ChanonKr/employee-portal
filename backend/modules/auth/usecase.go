@@ -5,14 +5,15 @@ import (
 	"errors"
 	"time"
 
-	"employee-portal/modules/entity"
+	authdomain "employee-portal/modules/auth/domain"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/security"
 )
 
 type Session struct {
 	Token     string
 	ExpiresAt time.Time
-	User      entity.User
+	User      authdomain.User
 }
 
 type CreateAccountInput struct {
@@ -41,55 +42,55 @@ func NewUsecase(repo Repository, tokens TokenIssuer) Usecase {
 // Login returns the same ErrUnauthorized for an unknown code, a wrong password and
 // a disabled account, so callers cannot tell which employee codes exist.
 func (u *usecase) Login(ctx context.Context, employeeCode, password string) (Session, error) {
-	code, err := entity.NormalizeEmployeeCode(employeeCode)
+	code, err := authdomain.NormalizeEmployeeCode(employeeCode)
 	if err != nil {
 		security.BurnPasswordCheck(password)
-		return Session{}, entity.ErrUnauthorized
+		return Session{}, shared.ErrUnauthorized
 	}
 
 	user, err := u.repo.GetUserByCode(ctx, code)
-	if errors.Is(err, entity.ErrNotFound) {
+	if errors.Is(err, shared.ErrNotFound) {
 		security.BurnPasswordCheck(password)
-		return Session{}, entity.ErrUnauthorized
+		return Session{}, shared.ErrUnauthorized
 	}
 	if err != nil {
 		return Session{}, err
 	}
 	if !security.CheckPassword(user.PasswordHash, password) || !user.IsActive {
-		return Session{}, entity.ErrUnauthorized
+		return Session{}, shared.ErrUnauthorized
 	}
 	return u.issue(user)
 }
 
 // Me re-reads the user so a disabled account loses access on the next app load.
-func (u *usecase) Me(ctx context.Context, actor entity.Actor) (entity.User, error) {
+func (u *usecase) Me(ctx context.Context, actor shared.Actor) (authdomain.User, error) {
 	user, err := u.repo.GetUserByID(ctx, actor.UserID)
-	if errors.Is(err, entity.ErrNotFound) {
-		return entity.User{}, entity.ErrUnauthorized
+	if errors.Is(err, shared.ErrNotFound) {
+		return authdomain.User{}, shared.ErrUnauthorized
 	}
 	if err != nil {
-		return entity.User{}, err
+		return authdomain.User{}, err
 	}
 	if !user.IsActive {
-		return entity.User{}, entity.ErrUnauthorized
+		return authdomain.User{}, shared.ErrUnauthorized
 	}
 	return user, nil
 }
 
-func (u *usecase) ChangePassword(ctx context.Context, actor entity.Actor, current, next string) (Session, error) {
+func (u *usecase) ChangePassword(ctx context.Context, actor shared.Actor, current, next string) (Session, error) {
 	user, err := u.Me(ctx, actor)
 	if err != nil {
 		return Session{}, err
 	}
 	// 400, not 401: a wrong current password must not look like an expired session.
 	if !security.CheckPassword(user.PasswordHash, current) {
-		return Session{}, entity.NewValidationError("currentPassword", "is incorrect")
+		return Session{}, shared.NewValidationError("currentPassword", "is incorrect")
 	}
-	if err := entity.ValidateNewPassword("newPassword", next); err != nil {
+	if err := authdomain.ValidateNewPassword("newPassword", next); err != nil {
 		return Session{}, err
 	}
 	if current == next {
-		return Session{}, entity.NewValidationError("newPassword", "must be different from the current password")
+		return Session{}, shared.NewValidationError("newPassword", "must be different from the current password")
 	}
 
 	hash, err := security.HashPassword(next)
@@ -103,11 +104,11 @@ func (u *usecase) ChangePassword(ctx context.Context, actor entity.Actor, curren
 	return u.issue(user)
 }
 
-func (u *usecase) CreateAccount(ctx context.Context, actor entity.Actor, in CreateAccountInput) (CreatedAccount, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) CreateAccount(ctx context.Context, actor shared.Actor, in CreateAccountInput) (CreatedAccount, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return CreatedAccount{}, err
 	}
-	acc, err := entity.NormalizeNewAccount(in.EmployeeCode, in.FirstName, in.LastName, in.Role)
+	acc, err := authdomain.NormalizeNewAccount(in.EmployeeCode, in.FirstName, in.LastName, in.Role)
 	if err != nil {
 		return CreatedAccount{}, err
 	}
@@ -123,8 +124,8 @@ func (u *usecase) CreateAccount(ctx context.Context, actor entity.Actor, in Crea
 }
 
 // ResetPassword sets a new temporary password that must be changed at next sign-in.
-func (u *usecase) ResetPassword(ctx context.Context, actor entity.Actor, employeeID int64) (string, error) {
-	if err := entity.RequireAdmin(actor); err != nil {
+func (u *usecase) ResetPassword(ctx context.Context, actor shared.Actor, employeeID int64) (string, error) {
+	if err := shared.RequireAdmin(actor); err != nil {
 		return "", err
 	}
 	userID, err := u.repo.UserIDByEmployee(ctx, employeeID)
@@ -141,8 +142,8 @@ func (u *usecase) ResetPassword(ctx context.Context, actor entity.Actor, employe
 	return temp, nil
 }
 
-func (u *usecase) issue(user entity.User) (Session, error) {
-	actor := entity.Actor{UserID: user.ID, Role: user.Role, MustChangePassword: user.MustChangePassword}
+func (u *usecase) issue(user authdomain.User) (Session, error) {
+	actor := shared.Actor{UserID: user.ID, Role: user.Role, MustChangePassword: user.MustChangePassword}
 	if user.EmployeeID != nil {
 		actor.EmployeeID = *user.EmployeeID
 	}

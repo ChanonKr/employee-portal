@@ -8,16 +8,19 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
+	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 	"employee-portal/pkg/database"
 )
 
 // contactColumn maps a domain field to its column. It is the only source of column
 // names used in updates, so user input never reaches SQL.
-var contactColumn = map[entity.ContactField]string{
-	entity.ContactMobile:  "mobile_phone",
-	entity.ContactEmail:   "contact_email",
-	entity.ContactAddress: "address",
+var contactColumn = map[profiledomain.ContactField]string{
+	profiledomain.ContactMobile:  "mobile_phone",
+	profiledomain.ContactEmail:   "contact_email",
+	profiledomain.ContactAddress: "address",
 }
 
 type repository struct {
@@ -28,7 +31,7 @@ func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
 }
 
-func (r *repository) GetProfile(ctx context.Context, employeeID int64) (entity.Profile, error) {
+func (r *repository) GetProfile(ctx context.Context, employeeID int64) (profiledomain.Profile, error) {
 	db := r.db.WithContext(ctx)
 	var row struct {
 		Employee     employeeModel `gorm:"embedded"` // named: GORM skips anonymous unexported types
@@ -40,13 +43,13 @@ func (r *repository) GetProfile(ctx context.Context, employeeID int64) (entity.P
 		Where("employees.id = ?", employeeID).
 		Take(&row).Error
 	if err != nil {
-		return entity.Profile{}, database.MapError(err)
+		return profiledomain.Profile{}, database.MapError(err)
 	}
 	var skills []skillModel
 	if err := db.Scopes(skillsOf(employeeID)).Find(&skills).Error; err != nil {
-		return entity.Profile{}, database.MapError(err)
+		return profiledomain.Profile{}, database.MapError(err)
 	}
-	return entity.Profile{
+	return profiledomain.Profile{
 		Employee:     row.Employee.toEntity(),
 		EmployeeCode: row.EmployeeCode,
 		Skills:       toSkills(skills),
@@ -64,12 +67,12 @@ type txRepository struct {
 	db *gorm.DB
 }
 
-func (t *txRepository) GetForUpdate(ctx context.Context, employeeID int64) (entity.Employee, error) {
+func (t *txRepository) GetForUpdate(ctx context.Context, employeeID int64) (profiledomain.Employee, error) {
 	var e employeeModel
 	// SELECT ... FOR UPDATE: concurrent edits of one profile are serialized.
 	err := t.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Take(&e, employeeID).Error
 	if err != nil {
-		return entity.Employee{}, database.MapError(err)
+		return profiledomain.Employee{}, database.MapError(err)
 	}
 	return e.toEntity(), nil
 }
@@ -77,7 +80,7 @@ func (t *txRepository) GetForUpdate(ctx context.Context, employeeID int64) (enti
 // update writes fields only if the version is still e.Version and bumps it.
 // No row matched = someone else changed it first (cannot happen under FOR UPDATE,
 // but report a conflict rather than "not found" if it ever does).
-func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map[string]any) (int32, error) {
+func (t *txRepository) update(ctx context.Context, e profiledomain.Employee, fields map[string]any) (int32, error) {
 	fields["version"] = gorm.Expr("version + 1")
 	fields["updated_at"] = gorm.Expr("now()")
 	res := t.db.WithContext(ctx).Model(&employeeModel{}).
@@ -87,12 +90,12 @@ func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map
 		return 0, database.MapError(res.Error)
 	}
 	if res.RowsAffected == 0 {
-		return 0, entity.ErrConflict
+		return 0, shared.ErrConflict
 	}
 	return e.Version + 1, nil
 }
 
-func (t *txRepository) SaveContact(ctx context.Context, e entity.Employee, f entity.ContactField) (int32, error) {
+func (t *txRepository) SaveContact(ctx context.Context, e profiledomain.Employee, f profiledomain.ContactField) (int32, error) {
 	col, ok := contactColumn[f]
 	if !ok {
 		return 0, fmt.Errorf("no column for contact field %q", f)
@@ -100,19 +103,19 @@ func (t *txRepository) SaveContact(ctx context.Context, e entity.Employee, f ent
 	return t.update(ctx, e, map[string]any{col: e.Contact(f)})
 }
 
-func (t *txRepository) SavePhoto(ctx context.Context, e entity.Employee) (int32, error) {
+func (t *txRepository) SavePhoto(ctx context.Context, e profiledomain.Employee) (int32, error) {
 	return t.update(ctx, e, map[string]any{"photo_path": e.PhotoPath})
 }
 
-func (t *txRepository) SaveName(ctx context.Context, e entity.Employee) (int32, error) {
+func (t *txRepository) SaveName(ctx context.Context, e profiledomain.Employee) (int32, error) {
 	return t.update(ctx, e, map[string]any{"first_name": e.FirstName, "last_name": e.LastName})
 }
 
-func (t *txRepository) BumpVersion(ctx context.Context, e entity.Employee) (int32, error) {
+func (t *txRepository) BumpVersion(ctx context.Context, e profiledomain.Employee) (int32, error) {
 	return t.update(ctx, e, map[string]any{})
 }
 
-func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c entity.Change, by entity.Actor) error {
+func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c historydomain.Change, by shared.Actor) error {
 	oldJSON, err := jsonOrNull(c.Old)
 	if err != nil {
 		return err
@@ -130,7 +133,7 @@ func (t *txRepository) AppendChange(ctx context.Context, employeeID int64, c ent
 	}).Error)
 }
 
-func (t *txRepository) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]entity.Skill, error) {
+func (t *txRepository) ListEmployeeSkills(ctx context.Context, employeeID int64) ([]skilldomain.Skill, error) {
 	var rows []skillModel
 	if err := t.db.WithContext(ctx).Scopes(skillsOf(employeeID)).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
@@ -138,9 +141,9 @@ func (t *txRepository) ListEmployeeSkills(ctx context.Context, employeeID int64)
 	return toSkills(rows), nil
 }
 
-func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]entity.Skill, error) {
+func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]skilldomain.Skill, error) {
 	if len(ids) == 0 {
-		return []entity.Skill{}, nil
+		return []skilldomain.Skill{}, nil
 	}
 	// Includes inactive skills so the use case can tell "unknown" from "inactive".
 	var rows []skillModel

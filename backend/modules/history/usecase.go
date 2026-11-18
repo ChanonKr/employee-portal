@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/shared"
 )
 
 type ListInput struct {
-	Actor    entity.Actor
+	Actor    shared.Actor
 	Field    string // "" = all fields
 	Page     int    // 0 = default
 	PageSize int    // 0 = default
@@ -18,8 +19,8 @@ type Result struct {
 	AllTime  bool // admin view: no time window (Days is 0)
 	Days     int  // the window used, so the UI never hard-codes "7"
 	HasOlder bool // true when changes exist before the window
-	Items    []entity.ChangeLog
-	Page     entity.PageRequest
+	Items    []historydomain.ChangeLog
+	Page     shared.PageRequest
 	HasNext  bool
 }
 
@@ -51,7 +52,7 @@ func (u *usecase) ListOwn(ctx context.Context, in ListInput) (Result, error) {
 }
 
 func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in ListInput) (Result, error) {
-	if err := entity.RequireAdmin(in.Actor); err != nil {
+	if err := shared.RequireAdmin(in.Actor); err != nil {
 		return Result{}, err
 	}
 	q, err := buildQuery(employeeID, in) // Days stays 0: no window
@@ -63,7 +64,7 @@ func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in List
 		return Result{}, err
 	}
 	if !exists {
-		return Result{}, entity.ErrNotFound
+		return Result{}, shared.ErrNotFound
 	}
 	res, err := u.list(ctx, q)
 	if err != nil {
@@ -73,16 +74,16 @@ func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in List
 	return res, nil
 }
 
-func buildQuery(employeeID int64, in ListInput) (entity.HistoryQuery, error) {
-	page, err := entity.NewPageRequest(in.Page, in.PageSize)
+func buildQuery(employeeID int64, in ListInput) (historydomain.HistoryQuery, error) {
+	page, err := shared.NewPageRequest(in.Page, in.PageSize)
 	if err != nil {
-		return entity.HistoryQuery{}, err
+		return historydomain.HistoryQuery{}, err
 	}
-	q := entity.HistoryQuery{EmployeeID: employeeID, PageRequest: page}
+	q := historydomain.HistoryQuery{EmployeeID: employeeID, PageRequest: page}
 	if in.Field != "" {
-		f, err := entity.ParseFieldName(in.Field)
+		f, err := historydomain.ParseFieldName(in.Field)
 		if err != nil {
-			return entity.HistoryQuery{}, err
+			return historydomain.HistoryQuery{}, err
 		}
 		q.Field = &f
 	}
@@ -90,7 +91,7 @@ func buildQuery(employeeID int64, in ListInput) (entity.HistoryQuery, error) {
 }
 
 // list fetches one extra row to tell whether there is a next page without COUNT.
-func (u *usecase) list(ctx context.Context, q entity.HistoryQuery) (Result, error) {
+func (u *usecase) list(ctx context.Context, q historydomain.HistoryQuery) (Result, error) {
 	items, err := u.repo.List(ctx, q, q.PageSize+1)
 	if err != nil {
 		return Result{}, err
@@ -105,13 +106,13 @@ func (u *usecase) list(ctx context.Context, q entity.HistoryQuery) (Result, erro
 // historyDays reads the admin setting (no restart needed after a change).
 func (u *usecase) historyDays(ctx context.Context) (int, error) {
 	raw, err := u.repo.HistoryDays(ctx)
-	if errors.Is(err, entity.ErrNotFound) {
+	if errors.Is(err, shared.ErrNotFound) {
 		return u.fallbackDays, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	days, err := entity.ParseHistoryDays(raw)
+	days, err := historydomain.ParseHistoryDays(raw)
 	if err != nil {
 		return u.fallbackDays, nil // a bad stored value must not break the page
 	}

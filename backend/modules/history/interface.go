@@ -3,7 +3,7 @@ package history
 import (
 	"context"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
 )
 
 // The ports this module defines: what the handler calls (Usecase) and what the
@@ -12,10 +12,10 @@ import (
 
 // Repository is implemented in repository.go.
 type Repository interface {
-	// HistoryDays returns the raw app_settings value, or entity.ErrNotFound.
+	// HistoryDays returns the raw app_settings value, or shared.ErrNotFound.
 	HistoryDays(ctx context.Context) (string, error)
 	// List returns at most limit rows, newest first.
-	List(ctx context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error)
+	List(ctx context.Context, q historydomain.HistoryQuery, limit int) ([]historydomain.ChangeLog, error)
 	HasOlder(ctx context.Context, employeeID int64, days int) (bool, error)
 	EmployeeExists(ctx context.Context, employeeID int64) (bool, error)
 }

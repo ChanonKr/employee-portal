@@ -5,7 +5,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	profiledomain "employee-portal/modules/profile/domain"
+	skilldomain "employee-portal/modules/skill/domain"
 )
 
 // GORM structs for the tables this module reads and writes. They mirror the SQL
@@ -29,8 +30,8 @@ type employeeModel struct {
 
 func (employeeModel) TableName() string { return "employees" }
 
-func (e employeeModel) toEntity() entity.Employee {
-	return entity.Employee{
+func (e employeeModel) toEntity() profiledomain.Employee {
+	return profiledomain.Employee{
 		ID: e.ID, UserID: e.UserID, FirstName: e.FirstName, LastName: e.LastName,
 		PhotoPath: e.PhotoPath, MobilePhone: e.MobilePhone, ContactEmail: e.ContactEmail,
 		Address: e.Address, Version: e.Version,
@@ -46,10 +47,10 @@ type skillModel struct {
 
 func (skillModel) TableName() string { return "skills" }
 
-func toSkills(rows []skillModel) []entity.Skill {
-	out := make([]entity.Skill, len(rows))
+func toSkills(rows []skillModel) []skilldomain.Skill {
+	out := make([]skilldomain.Skill, len(rows))
 	for i, r := range rows {
-		out[i] = entity.Skill{ID: r.ID, Name: r.Name, IsActive: r.IsActive}
+		out[i] = skilldomain.Skill{ID: r.ID, Name: r.Name, IsActive: r.IsActive}
 	}
 	return out
 }

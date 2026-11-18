@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
 	"employee-portal/modules/profile"
+	"employee-portal/modules/shared"
 	"employee-portal/modules/skill"
 )
 
@@ -48,7 +48,7 @@ func TestSetSkills_ReplacesSetAndLogsNames(t *testing.T) {
 	a, aName := newSkill(t, true)
 	b, bName := newSkill(t, true)
 	uc := newProfileUsecase(t)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	v, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{a, b}, Version: 1})
 	require.NoError(t, err)
@@ -80,11 +80,11 @@ func TestSetSkills_InactiveSkill(t *testing.T) {
 	active, _ := newSkill(t, true)
 	retired, _ := newSkill(t, false)
 	uc := newProfileUsecase(t)
-	actor := entity.Actor{UserID: userID, EmployeeID: empID}
+	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	// Cannot newly pick a retired skill.
 	_, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{active, retired}, Version: 1})
-	assert.ErrorIs(t, err, entity.ErrValidation)
+	assert.ErrorIs(t, err, shared.ErrValidation)
 	assert.Empty(t, employeeSkillIDs(t, empID))
 
 	// An employee who already has it (picked before it was retired) keeps it.
@@ -108,7 +108,7 @@ func TestSetSkills_LogFailureRollsBackSkills(t *testing.T) {
 	a, _ := newSkill(t, true)
 	uc := newProfileUsecase(t)
 
-	ghost := entity.Actor{UserID: 999_999_999, EmployeeID: empID} // log insert fails (FK)
+	ghost := shared.Actor{UserID: 999_999_999, EmployeeID: empID} // log insert fails (FK)
 	_, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: ghost, SkillIDs: []int64{a}, Version: 1})
 	require.Error(t, err)
 

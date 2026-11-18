@@ -1,4 +1,4 @@
-package entity
+package shared
 
 import (
 	"errors"
@@ -40,3 +40,15 @@ func (e *ValidationError) Error() string {
 }
 
 func (e *ValidationError) Is(target error) bool { return target == ErrValidation }
+
+// ErrPasswordChangeRequired blocks every API except /auth/* until the user
+// replaces a temporary password.
+var ErrPasswordChangeRequired = errors.New("password change required")
+
+// Photo rules shared with pkg/imaging, which checks and normalizes the image.
+const MaxPhotoSide = 512 // stored photos fit in 512×512
+
+var (
+	ErrPhotoTooLarge = errors.New("photo is too large")
+	ErrPhotoFormat   = errors.New("photo must be a JPEG, PNG or WebP image")
+)

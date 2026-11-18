@@ -1,15 +1,25 @@
-package entity
+// Package domain holds the account rules: users, sign-in codes, roles and the
+// password policy. No framework imports.
+package domain
 
 import (
-	"errors"
 	"regexp"
 	"strings"
 	"unicode"
+
+	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/shared"
 )
 
-// ErrPasswordChangeRequired blocks every API except /auth/* until the user
-// replaces a temporary password.
-var ErrPasswordChangeRequired = errors.New("password change required")
+type User struct {
+	ID                 int64
+	EmployeeCode       string
+	PasswordHash       string
+	Role               shared.Role
+	IsActive           bool
+	MustChangePassword bool
+	EmployeeID         *int64 // nil when the account has no employee profile
+}
 
 var employeeCodePattern = regexp.MustCompile(`^[A-Z0-9-]{3,20}$`)
 
@@ -17,19 +27,19 @@ var employeeCodePattern = regexp.MustCompile(`^[A-Z0-9-]{3,20}$`)
 func NormalizeEmployeeCode(raw string) (string, error) {
 	code := strings.ToUpper(strings.TrimSpace(raw))
 	if !employeeCodePattern.MatchString(code) {
-		return "", NewValidationError("employeeCode", "must be 3–20 letters, digits or dashes")
+		return "", shared.NewValidationError("employeeCode", "must be 3–20 letters, digits or dashes")
 	}
 	return code, nil
 }
 
-func ParseRole(s string) (Role, error) {
-	switch r := Role(s); r {
-	case RoleEmployee, RoleAdmin:
+func ParseRole(s string) (shared.Role, error) {
+	switch r := shared.Role(s); r {
+	case shared.RoleEmployee, shared.RoleAdmin:
 		return r, nil
 	case "":
-		return RoleEmployee, nil
+		return shared.RoleEmployee, nil
 	}
-	return "", NewValidationError("role", "must be employee or admin")
+	return "", shared.NewValidationError("role", "must be employee or admin")
 }
 
 const (
@@ -41,10 +51,10 @@ const (
 // at least one letter and one digit.
 func ValidateNewPassword(field, pw string) error {
 	if len([]rune(pw)) < minPasswordLength {
-		return NewValidationError(field, "must be at least 8 characters")
+		return shared.NewValidationError(field, "must be at least 8 characters")
 	}
 	if len(pw) > maxPasswordBytes {
-		return NewValidationError(field, "must be at most 72 bytes")
+		return shared.NewValidationError(field, "must be at most 72 bytes")
 	}
 	var letter, digit bool
 	for _, r := range pw {
@@ -52,7 +62,7 @@ func ValidateNewPassword(field, pw string) error {
 		digit = digit || unicode.IsDigit(r)
 	}
 	if !letter || !digit {
-		return NewValidationError(field, "must contain a letter and a digit")
+		return shared.NewValidationError(field, "must contain a letter and a digit")
 	}
 	return nil
 }
@@ -62,7 +72,7 @@ type NewAccount struct {
 	EmployeeCode string
 	FirstName    string
 	LastName     string
-	Role         Role
+	Role         shared.Role
 }
 
 // NormalizeNewAccount validates every field and returns the cleaned values.
@@ -72,10 +82,10 @@ func NormalizeNewAccount(code, first, last, role string) (NewAccount, error) {
 	if a.EmployeeCode, err = NormalizeEmployeeCode(code); err != nil {
 		return a, err
 	}
-	if a.FirstName, err = normalizeName("firstName", first); err != nil {
+	if a.FirstName, err = profiledomain.NormalizeName("firstName", first); err != nil {
 		return a, err
 	}
-	if a.LastName, err = normalizeName("lastName", last); err != nil {
+	if a.LastName, err = profiledomain.NormalizeName("lastName", last); err != nil {
 		return a, err
 	}
 	if a.Role, err = ParseRole(role); err != nil {

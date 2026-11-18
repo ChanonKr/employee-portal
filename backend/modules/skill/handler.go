@@ -5,7 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
+	skilldomain "employee-portal/modules/skill/domain"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
@@ -77,7 +78,7 @@ func (h *Handler) AdminList(c *gin.Context) {
 func (h *Handler) Create(c *gin.Context) {
 	var req createRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("name", "is required"))
+		httputil.WriteError(c, shared.NewValidationError("name", "is required"))
 		return
 	}
 	id, err := h.uc.Create(c.Request.Context(), middleware.ActorFrom(c), req.Name)
@@ -96,7 +97,7 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 	var req updateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("body", "must be JSON with name and/or isActive"))
+		httputil.WriteError(c, shared.NewValidationError("body", "must be JSON with name and/or isActive"))
 		return
 	}
 	err := h.uc.Update(c.Request.Context(), middleware.ActorFrom(c), UpdateInput{ID: id, Name: req.Name, IsActive: req.IsActive})
@@ -111,16 +112,16 @@ func (h *Handler) Update(c *gin.Context) {
 func (h *Handler) Reorder(c *gin.Context) {
 	var req []orderItem
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("order", "must be an array of {id, sortOrder}"))
+		httputil.WriteError(c, shared.NewValidationError("order", "must be an array of {id, sortOrder}"))
 		return
 	}
-	items := make([]entity.SkillOrder, len(req))
+	items := make([]skilldomain.SkillOrder, len(req))
 	for i, it := range req {
 		if it.SortOrder == nil { // do not rely on validator support for slice elements
-			httputil.WriteError(c, entity.NewValidationError("order", "every item needs sortOrder"))
+			httputil.WriteError(c, shared.NewValidationError("order", "every item needs sortOrder"))
 			return
 		}
-		items[i] = entity.SkillOrder{ID: it.ID, SortOrder: *it.SortOrder}
+		items[i] = skilldomain.SkillOrder{ID: it.ID, SortOrder: *it.SortOrder}
 	}
 	if err := h.uc.Reorder(c.Request.Context(), middleware.ActorFrom(c), items); err != nil {
 		httputil.WriteError(c, err)

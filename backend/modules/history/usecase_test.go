@@ -8,22 +8,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/entity"
+	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/shared"
 )
 
 type fakeRepo struct {
 	days     string
 	daysErr  error
-	logs     []entity.ChangeLog // newest first
+	logs     []historydomain.ChangeLog // newest first
 	hasOlder bool
 
-	gotQuery entity.HistoryQuery
+	gotQuery historydomain.HistoryQuery
 	gotLimit int
 }
 
 func (f *fakeRepo) HistoryDays(context.Context) (string, error) { return f.days, f.daysErr }
 
-func (f *fakeRepo) List(_ context.Context, q entity.HistoryQuery, limit int) ([]entity.ChangeLog, error) {
+func (f *fakeRepo) List(_ context.Context, q historydomain.HistoryQuery, limit int) ([]historydomain.ChangeLog, error) {
 	f.gotQuery, f.gotLimit = q, limit
 	start := min(q.Offset(), len(f.logs))
 	end := min(start+limit, len(f.logs))
@@ -34,15 +35,15 @@ func (f *fakeRepo) HasOlder(context.Context, int64, int) (bool, error) { return 
 
 func (f *fakeRepo) EmployeeExists(_ context.Context, id int64) (bool, error) { return id != 404, nil }
 
-func logs(n int) []entity.ChangeLog {
-	out := make([]entity.ChangeLog, n)
+func logs(n int) []historydomain.ChangeLog {
+	out := make([]historydomain.ChangeLog, n)
 	for i := range out {
-		out[i] = entity.ChangeLog{ID: int64(n - i)}
+		out[i] = historydomain.ChangeLog{ID: int64(n - i)}
 	}
 	return out
 }
 
-var actor = entity.Actor{UserID: 1, EmployeeID: 10}
+var actor = shared.Actor{UserID: 1, EmployeeID: 10}
 
 func TestListOwn(t *testing.T) {
 	ctx := context.Background()
@@ -56,12 +57,12 @@ func TestListOwn(t *testing.T) {
 		assert.EqualValues(t, 10, repo.gotQuery.EmployeeID, "employee comes from the actor")
 		assert.True(t, res.HasOlder)
 		assert.Len(t, res.Items, 3)
-		assert.Equal(t, entity.PageRequest{Page: 1, PageSize: entity.DefaultPageSize}, res.Page)
+		assert.Equal(t, shared.PageRequest{Page: 1, PageSize: shared.DefaultPageSize}, res.Page)
 		assert.False(t, res.HasNext)
 	})
 
 	t.Run("falls back to env days when the setting is missing or invalid", func(t *testing.T) {
-		for _, repo := range []*fakeRepo{{daysErr: entity.ErrNotFound}, {days: "0"}, {days: "abc"}} {
+		for _, repo := range []*fakeRepo{{daysErr: shared.ErrNotFound}, {days: "0"}, {days: "abc"}} {
 			res, err := NewUsecase(repo, 7).ListOwn(ctx, ListInput{Actor: actor})
 			require.NoError(t, err)
 			assert.Equal(t, 7, res.Days)
@@ -93,21 +94,21 @@ func TestListOwn(t *testing.T) {
 		_, err := NewUsecase(repo, 7).ListOwn(ctx, ListInput{Actor: actor, Field: "skills"})
 		require.NoError(t, err)
 		require.NotNil(t, repo.gotQuery.Field)
-		assert.Equal(t, entity.FieldSkills, *repo.gotQuery.Field)
+		assert.Equal(t, historydomain.FieldSkills, *repo.gotQuery.Field)
 
 		_, err = NewUsecase(repo, 7).ListOwn(ctx, ListInput{Actor: actor, Field: "password_hash"})
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 	})
 
 	t.Run("invalid paging", func(t *testing.T) {
 		_, err := NewUsecase(&fakeRepo{days: "7"}, 7).ListOwn(ctx, ListInput{Actor: actor, PageSize: 1000})
-		assert.ErrorIs(t, err, entity.ErrValidation)
+		assert.ErrorIs(t, err, shared.ErrValidation)
 	})
 }
 
 func TestListForEmployee(t *testing.T) {
 	ctx := context.Background()
-	admin := entity.Actor{UserID: 9, Role: entity.RoleAdmin}
+	admin := shared.Actor{UserID: 9, Role: shared.RoleAdmin}
 
 	repo := &fakeRepo{days: "7", logs: logs(3), hasOlder: true}
 	res, err := NewUsecase(repo, 7).ListForEmployee(ctx, 55, ListInput{Actor: admin})
@@ -118,8 +119,8 @@ func TestListForEmployee(t *testing.T) {
 	assert.Len(t, res.Items, 3)
 
 	_, err = NewUsecase(repo, 7).ListForEmployee(ctx, 404, ListInput{Actor: admin})
-	assert.ErrorIs(t, err, entity.ErrNotFound)
+	assert.ErrorIs(t, err, shared.ErrNotFound)
 
 	_, err = NewUsecase(repo, 7).ListForEmployee(ctx, 55, ListInput{Actor: actor})
-	assert.ErrorIs(t, err, entity.ErrForbidden)
+	assert.ErrorIs(t, err, shared.ErrForbidden)
 }

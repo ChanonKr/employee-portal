@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
@@ -52,7 +52,7 @@ func (h *Handler) Get(c *gin.Context) {
 func (h *Handler) SetHistoryDays(c *gin.Context) {
 	var req historyDaysRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("value", "must be a whole number from 1 to 365"))
+		httputil.WriteError(c, shared.NewValidationError("value", "must be a whole number from 1 to 365"))
 		return
 	}
 	if err := h.uc.SetHistoryDays(c.Request.Context(), middleware.ActorFrom(c), *req.Value); err != nil {

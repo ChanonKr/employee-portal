@@ -5,7 +5,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"employee-portal/modules/entity"
+	authdomain "employee-portal/modules/auth/domain"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/database"
 )
 
@@ -24,7 +25,7 @@ type userRow struct {
 	EmployeeID *int64
 }
 
-func (r *repository) getUser(ctx context.Context, where string, arg any) (entity.User, error) {
+func (r *repository) getUser(ctx context.Context, where string, arg any) (authdomain.User, error) {
 	var row userRow
 	err := r.db.WithContext(ctx).Model(&userModel{}).
 		Select("users.*, employees.id AS employee_id").
@@ -32,25 +33,25 @@ func (r *repository) getUser(ctx context.Context, where string, arg any) (entity
 		Where(where, arg).
 		Take(&row).Error
 	if err != nil {
-		return entity.User{}, database.MapError(err)
+		return authdomain.User{}, database.MapError(err)
 	}
 	u := row.User
-	return entity.User{
+	return authdomain.User{
 		ID: u.ID, EmployeeCode: u.EmployeeCode, PasswordHash: u.PasswordHash,
-		Role: entity.Role(u.Role), IsActive: u.IsActive,
+		Role: shared.Role(u.Role), IsActive: u.IsActive,
 		MustChangePassword: u.MustChangePassword, EmployeeID: row.EmployeeID,
 	}, nil
 }
 
-func (r *repository) GetUserByCode(ctx context.Context, code string) (entity.User, error) {
+func (r *repository) GetUserByCode(ctx context.Context, code string) (authdomain.User, error) {
 	return r.getUser(ctx, "users.employee_code = ?", code)
 }
 
-func (r *repository) GetUserByID(ctx context.Context, id int64) (entity.User, error) {
+func (r *repository) GetUserByID(ctx context.Context, id int64) (authdomain.User, error) {
 	return r.getUser(ctx, "users.id = ?", id)
 }
 
-func (r *repository) CreateAccount(ctx context.Context, a entity.NewAccount, passwordHash string) (int64, int64, error) {
+func (r *repository) CreateAccount(ctx context.Context, a authdomain.NewAccount, passwordHash string) (int64, int64, error) {
 	// New accounts must change the temporary password on first sign-in.
 	u := userModel{EmployeeCode: a.EmployeeCode, PasswordHash: passwordHash, Role: string(a.Role), MustChangePassword: true}
 	e := employeeModel{FirstName: a.FirstName, LastName: a.LastName}
@@ -71,7 +72,7 @@ func (r *repository) SetPassword(ctx context.Context, userID int64, passwordHash
 		return database.MapError(res.Error)
 	}
 	if res.RowsAffected == 0 {
-		return entity.ErrNotFound
+		return shared.ErrNotFound
 	}
 	return nil
 }

@@ -6,7 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/entity"
+	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/shared"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
@@ -73,7 +74,7 @@ func (h *Handler) UpdateContact(c *gin.Context) {
 	}
 	var req updateContactRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("value", "is required"))
+		httputil.WriteError(c, shared.NewValidationError("value", "is required"))
 		return
 	}
 
@@ -107,10 +108,10 @@ func (h *Handler) UpdatePhoto(c *gin.Context) {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			httputil.WriteError(c, entity.ErrPhotoTooLarge)
+			httputil.WriteError(c, shared.ErrPhotoTooLarge)
 			return
 		}
-		httputil.WriteError(c, entity.NewValidationError("file", "is required"))
+		httputil.WriteError(c, shared.NewValidationError("file", "is required"))
 		return
 	}
 	defer file.Close()
@@ -137,7 +138,7 @@ func (h *Handler) SetSkills(c *gin.Context) {
 	}
 	var req setSkillsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("skillIds", "must be an array of skill ids"))
+		httputil.WriteError(c, shared.NewValidationError("skillIds", "must be an array of skill ids"))
 		return
 	}
 
@@ -172,7 +173,7 @@ func (h *Handler) AdminUpdateName(c *gin.Context) {
 	}
 	var req updateNameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, entity.NewValidationError("body", "must be JSON with firstName and lastName"))
+		httputil.WriteError(c, shared.NewValidationError("body", "must be JSON with firstName and lastName"))
 		return
 	}
 	v, err := h.uc.UpdateName(c.Request.Context(), UpdateNameInput{
@@ -187,7 +188,7 @@ func (h *Handler) AdminUpdateName(c *gin.Context) {
 	c.JSON(http.StatusOK, versionResponse{Version: v})
 }
 
-func toProfileResponse(p entity.Profile) profileResponse {
+func toProfileResponse(p profiledomain.Profile) profileResponse {
 	res := profileResponse{
 		ID:           p.ID,
 		EmployeeCode: p.EmployeeCode,
