@@ -112,7 +112,7 @@ func TestAdmin_RenameEmployeeAndSeeAllHistory(t *testing.T) {
 	res = admin.do("GET", fmt.Sprintf("/api/v1/admin/employees/%d/history", empID), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	all := decodeJSON[history](t, res)
-	assert.Nil(t, all.Days, "null = all time")
+	assert.Nil(t, all.Days, "null = no window: everything still kept")
 	assert.Len(t, all.Items, 2)
 
 	assert.Equal(t, http.StatusNotFound,

@@ -7,7 +7,7 @@ import (
 	"employee-portal/pkg/httputil"
 )
 
-// RequireRole must run after Auth. Use cases check the role again (defense in depth).
+// RequireRole must run after Auth. Services check the role again (defense in depth).
 func RequireRole(role shared.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if ActorFrom(c).Role != role {

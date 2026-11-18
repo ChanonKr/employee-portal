@@ -21,13 +21,13 @@ describe('api client', () => {
   it('turns the error envelope into ApiError', async () => {
     mockFetch(() => ({
       status: 400,
-      body: { error: { code: 'VALIDATION_ERROR', message: 'Some fields are invalid.', fields: { mobile: 'must be 9–15 digits' }, requestId: 'r1' } },
+      body: { error: { code: 'VALIDATION_ERROR', message: 'Some fields are invalid.', fields: { mobile: 'must be 10 digits, for example 0812345678' }, requestId: 'r1' } },
     }))
     const err = (await api.get('/x').catch((e: unknown) => e)) as ApiError
     expect(err).toBeInstanceOf(ApiError)
     expect(err.code).toBe('VALIDATION_ERROR')
     expect(err.requestId).toBe('r1')
-    expect(errorMessage(err)).toBe('Mobile must be 9–15 digits')
+    expect(errorMessage(err)).toBe('Mobile must be 10 digits, for example 0812345678')
   })
 
   it('calls the unauthorized handler on 401, except for login and me', async () => {
