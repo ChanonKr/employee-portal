@@ -24,8 +24,16 @@ const (
 	maxAddressLength = 500
 )
 
-// Same rule as the CHECK constraint on employees.mobile_phone.
-var mobilePattern = regexp.MustCompile(`^\+?[0-9]{9,15}$`)
+// A mobile number is exactly 10 digits (e.g. 0812345678); the UI shows it as
+// 081 234 5678. The CHECK constraint on employees.mobile_phone is a looser
+// backstop (9–15 digits, optional +) so older rows stay valid.
+var mobilePattern = regexp.MustCompile(`^[0-9]{10}$`)
+
+// emailPattern is a practical address check on top of net/mail: a local part of
+// letters, digits and . _ % + - (no leading, trailing or double dots) and a domain
+// of dot-separated labels ending in a TLD of 2+ letters. Same rule as the web form.
+var emailPattern = regexp.MustCompile(
+	`^[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
 
 var phoneSeparators = strings.NewReplacer(" ", "", "-", "", "(", "", ")", "")
 
@@ -65,15 +73,16 @@ func (f ContactField) Validate(v string) error {
 	switch f {
 	case ContactMobile:
 		if !mobilePattern.MatchString(v) {
-			return shared.NewValidationError(string(f), "must be 9–15 digits, optionally starting with +")
+			return shared.NewValidationError(string(f), "must be 10 digits, for example 0812345678")
 		}
 	case ContactEmail:
 		if len(v) > maxEmailLength {
 			return shared.NewValidationError(string(f), "must be at most 254 characters")
 		}
 		// ParseAddress also accepts `Name <a@b.c>`; require a bare address.
+		// Normalize lower-cases it, so the pattern only needs lower case.
 		addr, err := mail.ParseAddress(v)
-		if err != nil || addr.Address != v {
+		if err != nil || addr.Address != v || !emailPattern.MatchString(v) {
 			return shared.NewValidationError(string(f), "must be a valid email address")
 		}
 	case ContactAddress:

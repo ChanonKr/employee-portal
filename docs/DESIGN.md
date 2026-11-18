@@ -163,7 +163,7 @@ CREATE TABLE employees (
   first_name     TEXT        NOT NULL CHECK (length(first_name) BETWEEN 1 AND 100),
   last_name      TEXT        NOT NULL CHECK (length(last_name)  BETWEEN 1 AND 100),
   photo_path     TEXT,
-  mobile_phone   TEXT        CHECK (mobile_phone  ~ '^\+?[0-9]{9,15}$'),
+  mobile_phone   TEXT        CHECK (mobile_phone  ~ '^\+?[0-9]{9,15}$'),  -- ด่านสำรอง; แอปบังคับ 10 หลัก (§6.3)
   contact_email  TEXT        CHECK (length(contact_email) <= 254),
   address        TEXT        CHECK (length(address) BETWEEN 1 AND 500),
   version        INTEGER     NOT NULL DEFAULT 1,                       -- optimistic locking
@@ -413,8 +413,8 @@ module: จัดการ skill อยู่ใน `skill/` (เจ้าขอ
 ### 6.3 Validation Rules (Go — ชั้นแรก)
 | Field | Rule |
 |---|---|
-| mobile | trim, ตัด `-` / ช่องว่าง / วงเล็บ, `^\+?[0-9]{9,15}$` (กฎเดียวกับ CHECK ใน DB) |
-| email | trim, lowercase, `net/mail` ต้องเป็น address เปล่า (ไม่รับ `Name <a@b>`), ≤ 254 |
+| mobile | trim, ตัด `-` / ช่องว่าง / วงเล็บ, ต้องเป็นตัวเลข 10 หลักพอดี `^[0-9]{10}$` · เก็บเป็นตัวเลขติดกัน (`0812345678`) แสดงเป็น `081 234 5678` · ช่องกรอกรับเฉพาะตัวเลข (ตัวอื่นถูกตัดทิ้งขณะพิมพ์/วาง, สูงสุด 10 หลัก) · CHECK ใน DB หลวมกว่า (`^\+?[0-9]{9,15}$`) เป็นด่านสำรองให้แถวเก่ายังใช้ได้ |
+| email | trim, lowercase, `net/mail` ต้องเป็น address เปล่า (ไม่รับ `Name <a@b>`) + pattern: ก่อน `@` เป็น a-z 0-9 `. _ % + -` (ไม่ขึ้นต้น/ลงท้าย/ซ้อนด้วย `.`), domain เป็น label คั่นด้วย `.` และลงท้ายด้วย TLD ตัวอักษร ≥ 2 ตัว (ไม่รับ `a@b`, `a@b.c`, `a..b@x.com`) · ≤ 254 · หน้าเว็บใช้ pattern เดียวกัน |
 | address | trim, 1–500 ตัวอักษร (นับเป็น rune — ภาษาไทยนับถูก) |
 | contact ทุก field | กรอกค่าได้แต่ล้างเป็นค่าว่างไม่ได้ (ตั้งใจ — ลดความกำกวมของ "ลบ" กับ "ไม่ส่ง") |
 | photo | ≤ 5 MB, magic bytes = jpeg/png/webp, decode ได้, resize ≤ 512×512 → JPEG q85 |
