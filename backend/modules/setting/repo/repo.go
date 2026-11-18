@@ -1,4 +1,4 @@
-package setting
+package repo
 
 import (
 	"context"
@@ -7,35 +7,40 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	settingdomain "employee-portal/modules/setting/domain"
+	"employee-portal/modules/setting/domain"
+	"employee-portal/modules/setting/model"
+	"employee-portal/modules/setting/service"
 	"employee-portal/modules/shared"
 	"employee-portal/pkg/database"
 )
 
-type repository struct {
+// Repository implements service.Repository with GORM.
+type Repository struct {
 	db *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) Repository {
-	return &repository{db: db}
+var _ service.Repository = (*Repository)(nil)
+
+func New(db *gorm.DB) *Repository {
+	return &Repository{db: db}
 }
 
-func (r *repository) Get(ctx context.Context, key string) (string, settingdomain.HistorySettings, error) {
+func (r *Repository) Get(ctx context.Context, key string) (string, domain.HistorySettings, error) {
 	var row struct {
 		Value         string
 		UpdatedAt     time.Time
 		UpdatedByID   *int64
 		UpdatedByCode *string
 	}
-	err := r.db.WithContext(ctx).Model(&settingModel{}).
+	err := r.db.WithContext(ctx).Model(&model.Setting{}).
 		Select("app_settings.value, app_settings.updated_at, users.id AS updated_by_id, users.employee_code AS updated_by_code").
 		Joins("LEFT JOIN users ON users.id = app_settings.updated_by").
 		Where("app_settings.key = ?", key).
 		Take(&row).Error
 	if err != nil {
-		return "", settingdomain.HistorySettings{}, database.MapError(err)
+		return "", domain.HistorySettings{}, database.MapError(err)
 	}
-	s := settingdomain.HistorySettings{UpdatedByID: row.UpdatedByID, UpdatedByCode: row.UpdatedByCode}
+	s := domain.HistorySettings{UpdatedByID: row.UpdatedByID, UpdatedByCode: row.UpdatedByCode}
 	if row.UpdatedByID != nil { // seed rows have no editor; their timestamp is the migration time
 		at := row.UpdatedAt
 		s.UpdatedAt = &at
@@ -43,9 +48,9 @@ func (r *repository) Get(ctx context.Context, key string) (string, settingdomain
 	return row.Value, s, nil
 }
 
-func (r *repository) Set(ctx context.Context, key, value string, by shared.Actor) error {
+func (r *Repository) Set(ctx context.Context, key, value string, by shared.Actor) error {
 	uid := by.UserID
-	s := settingModel{Key: key, Value: value, UpdatedBy: &uid}
+	s := model.Setting{Key: key, Value: value, UpdatedBy: &uid}
 	// INSERT ... ON CONFLICT (key) DO UPDATE
 	return database.MapError(r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},

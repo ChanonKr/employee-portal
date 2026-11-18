@@ -12,7 +12,9 @@ import (
 	"employee-portal/modules/file"
 	"employee-portal/modules/history"
 	"employee-portal/modules/profile"
-	"employee-portal/modules/setting"
+	settingapi "employee-portal/modules/setting/api"
+	settingrepo "employee-portal/modules/setting/repo"
+	settingservice "employee-portal/modules/setting/service"
 	"employee-portal/modules/shared"
 	skillapi "employee-portal/modules/skill/api"
 	skillrepo "employee-portal/modules/skill/repo"
@@ -54,7 +56,6 @@ func (s *Server) routes() {
 	})).RegisterRoutes(r, s.cfg.UploadMaxBytes)
 
 	history.NewHandler(history.NewUsecase(history.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
-	setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
 	employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.db))).RegisterRoutes(r)
 	file.NewHandler(s.files).RegisterRoutes(r)
 
@@ -64,6 +65,10 @@ func (s *Server) routes() {
 	r.Admin.POST("/skills", skills.Create)
 	r.Admin.PATCH("/skills/:id", skills.Update)
 	r.Admin.PUT("/skills/order", skills.Reorder)
+
+	settings := settingapi.New(settingservice.New(settingrepo.New(s.db), s.cfg.HistoryDays))
+	r.Admin.GET("/settings", settings.Get)
+	r.Admin.PUT("/settings/history-days", settings.SetHistoryDays)
 }
 
 func (s *Server) health(c *gin.Context) {

@@ -1,8 +1,7 @@
-package setting
+package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,32 +10,18 @@ import (
 	"employee-portal/pkg/middleware"
 )
 
-type Handler struct {
-	uc Usecase
+// API is the HTTP adapter for this feature. Routes are registered in modules/server.
+type API struct {
+	svc Service
 }
 
-func NewHandler(uc Usecase) *Handler {
-	return &Handler{uc: uc}
-}
-
-type updatedByDTO struct {
-	ID           int64  `json:"id"`
-	EmployeeCode string `json:"employeeCode"`
-}
-
-type settingsResponse struct {
-	HistoryDays int           `json:"historyDays"`
-	UpdatedBy   *updatedByDTO `json:"updatedBy"`
-	UpdatedAt   *time.Time    `json:"updatedAt"`
-}
-
-type historyDaysRequest struct {
-	Value *int `json:"value" binding:"required"`
+func New(svc Service) *API {
+	return &API{svc: svc}
 }
 
 // Get: GET /admin/settings
-func (h *Handler) Get(c *gin.Context) {
-	s, err := h.uc.GetHistory(c.Request.Context(), middleware.ActorFrom(c))
+func (h *API) Get(c *gin.Context) {
+	s, err := h.svc.GetHistory(c.Request.Context(), middleware.ActorFrom(c))
 	if err != nil {
 		httputil.WriteError(c, err)
 		return
@@ -49,13 +34,13 @@ func (h *Handler) Get(c *gin.Context) {
 }
 
 // SetHistoryDays: PUT /admin/settings/history-days {value} (1–365) → 204
-func (h *Handler) SetHistoryDays(c *gin.Context) {
+func (h *API) SetHistoryDays(c *gin.Context) {
 	var req historyDaysRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httputil.WriteError(c, shared.NewValidationError("value", "must be a whole number from 1 to 365"))
 		return
 	}
-	if err := h.uc.SetHistoryDays(c.Request.Context(), middleware.ActorFrom(c), *req.Value); err != nil {
+	if err := h.svc.SetHistoryDays(c.Request.Context(), middleware.ActorFrom(c), *req.Value); err != nil {
 		httputil.WriteError(c, err)
 		return
 	}
