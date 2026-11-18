@@ -1,5 +1,5 @@
 // Package model holds the read-only row shapes for profile_change_logs and
-// app_settings (see modules/profile/model for the rules); only repo uses them.
+// app_settings (see modules/profile/model for the rules); only repository uses them.
 package model
 
 import "time"

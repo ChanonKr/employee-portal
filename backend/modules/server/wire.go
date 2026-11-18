@@ -2,23 +2,23 @@ package server
 
 import (
 	authapi "employee-portal/modules/auth/api"
-	authrepo "employee-portal/modules/auth/repo"
+	authrepository "employee-portal/modules/auth/repository"
 	authservice "employee-portal/modules/auth/service"
 	employeeapi "employee-portal/modules/employee/api"
-	employeerepo "employee-portal/modules/employee/repo"
+	employeerepository "employee-portal/modules/employee/repository"
 	employeeservice "employee-portal/modules/employee/service"
 	fileapi "employee-portal/modules/file/api"
 	historyapi "employee-portal/modules/history/api"
-	historyrepo "employee-portal/modules/history/repo"
+	historyrepository "employee-portal/modules/history/repository"
 	historyservice "employee-portal/modules/history/service"
 	profileapi "employee-portal/modules/profile/api"
-	profilerepo "employee-portal/modules/profile/repo"
+	profilerepository "employee-portal/modules/profile/repository"
 	profileservice "employee-portal/modules/profile/service"
 	settingapi "employee-portal/modules/setting/api"
-	settingrepo "employee-portal/modules/setting/repo"
+	settingrepository "employee-portal/modules/setting/repository"
 	settingservice "employee-portal/modules/setting/service"
 	skillapi "employee-portal/modules/skill/api"
-	skillrepo "employee-portal/modules/skill/repo"
+	skillrepository "employee-portal/modules/skill/repository"
 	skillservice "employee-portal/modules/skill/service"
 	"employee-portal/pkg/imaging"
 )
@@ -34,24 +34,24 @@ type apis struct {
 	file     *fileapi.API
 }
 
-// wire builds each feature: repo → service → api. This and routes.go are the
+// wire builds each feature: repository → service → api. This and routes.go are the
 // only places that know about every feature.
 func (s *Server) wire() apis {
 	return apis{
 		auth: authapi.New(
-			authservice.New(authrepo.New(s.db), s.tokens),
+			authservice.New(authrepository.New(s.db), s.tokens),
 			authapi.CookieOptions{Secure: s.cfg.IsProduction()},
 		),
 		profile: profileapi.New(profileservice.New(profileservice.Deps{
-			Repo:   profilerepo.New(s.db),
+			Repo:   profilerepository.New(s.db),
 			Photos: imaging.NewProcessor(s.cfg.UploadMaxBytes),
 			Files:  s.files,
 			Log:    s.log,
 		})),
-		history:  historyapi.New(historyservice.New(historyrepo.New(s.db), s.cfg.HistoryRetentionDays)),
-		skill:    skillapi.New(skillservice.New(skillrepo.New(s.db))),
-		setting:  settingapi.New(settingservice.New(settingrepo.New(s.db), s.cfg.HistoryRetentionDays)),
-		employee: employeeapi.New(employeeservice.New(employeerepo.New(s.db))),
+		history:  historyapi.New(historyservice.New(historyrepository.New(s.db), s.cfg.HistoryRetentionDays)),
+		skill:    skillapi.New(skillservice.New(skillrepository.New(s.db))),
+		setting:  settingapi.New(settingservice.New(settingrepository.New(s.db), s.cfg.HistoryRetentionDays)),
+		employee: employeeapi.New(employeeservice.New(employeerepository.New(s.db))),
 		file:     fileapi.New(s.files),
 	}
 }

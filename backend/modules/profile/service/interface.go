@@ -10,7 +10,7 @@ import (
 	skilldomain "employee-portal/modules/skill/domain"
 )
 
-// Repository is the port this service needs; repo.Repository implements it.
+// Repository is the port this service needs; repository.Repository implements it.
 // The service owns the interface, so it never imports GORM or pgx.
 type Repository interface {
 	GetProfile(ctx context.Context, employeeID int64) (domain.Profile, error)

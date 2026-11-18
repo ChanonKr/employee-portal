@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	historyrepo "employee-portal/modules/history/repo"
+	historyrepository "employee-portal/modules/history/repository"
 	historyservice "employee-portal/modules/history/service"
 )
 
@@ -15,7 +15,7 @@ import (
 // until ctx is cancelled. db must connect as the "retention" role. Several API
 // instances may run it: a database lock lets only one purge at a time.
 func (s *Server) RunRetention(ctx context.Context, db *gorm.DB) {
-	job := historyservice.NewRetention(historyrepo.NewRetention(db), s.files, s.cfg.HistoryRetentionDays, s.log)
+	job := historyservice.NewRetention(historyrepository.NewRetention(db), s.files, s.cfg.HistoryRetentionDays, s.log)
 	run := func() {
 		start := time.Now()
 		res, err := job.Run(ctx)

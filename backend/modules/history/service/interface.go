@@ -6,7 +6,7 @@ import (
 	"employee-portal/modules/history/domain"
 )
 
-// Repository is the port this service needs; repo.Repository implements it.
+// Repository is the port this service needs; repository.Repository implements it.
 type Repository interface {
 	// HistoryDays returns the raw app_settings value, or shared.ErrNotFound.
 	HistoryDays(ctx context.Context) (string, error)

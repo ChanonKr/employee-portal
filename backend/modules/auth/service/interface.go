@@ -8,7 +8,7 @@ import (
 	"employee-portal/modules/shared"
 )
 
-// Repository is the port this service needs; repo.Repository implements it.
+// Repository is the port this service needs; repository.Repository implements it.
 type Repository interface {
 	GetUserByCode(ctx context.Context, code string) (domain.User, error)
 	GetUserByID(ctx context.Context, id int64) (domain.User, error)

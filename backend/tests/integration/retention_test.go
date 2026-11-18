@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	historyrepo "employee-portal/modules/history/repo"
+	historyrepository "employee-portal/modules/history/repository"
 	historyservice "employee-portal/modules/history/service"
 	"employee-portal/pkg/storage"
 )
@@ -86,7 +86,7 @@ func TestRetention_KeepsWindowAndThreeOlderPhotos(t *testing.T) {
 	_, err = ownerPool.Exec(ctx, `UPDATE employees SET photo_path = $1 WHERE id = $2`, pb[3], empB)
 	require.NoError(t, err)
 
-	job := historyservice.NewRetention(historyrepo.NewRetention(retentionDB), files, 90, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	job := historyservice.NewRetention(historyrepository.NewRetention(retentionDB), files, 90, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	res, err := job.Run(ctx)
 	require.NoError(t, err)
 	assert.True(t, res.Ran)
@@ -121,7 +121,7 @@ func TestRetention_SkipsWhileAnotherInstanceIsPurging(t *testing.T) {
 	userID, empID, _ := newEmployee(t, "0811111111")
 	addChange(t, empID, userID, "address", "", "Old Road", 200)
 
-	res, err := historyrepo.NewRetention(retentionDB).Purge(ctx, timeDaysAgo(90), 3)
+	res, err := historyrepository.NewRetention(retentionDB).Purge(ctx, timeDaysAgo(90), 3)
 	require.NoError(t, err)
 	assert.False(t, res.Ran)
 	assert.Equal(t, 1, countLogs(t, empID), "nothing deleted")

@@ -6,7 +6,7 @@ import (
 	"employee-portal/modules/skill/domain"
 )
 
-// Repository is the port this service needs; repo.Repository implements it and
+// Repository is the port this service needs; repository.Repository implements it and
 // tests use a fake.
 type Repository interface {
 	ListActive(ctx context.Context) ([]domain.Skill, error)

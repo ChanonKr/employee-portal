@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	historydomain "employee-portal/modules/history/domain"
-	historyrepo "employee-portal/modules/history/repo"
+	historyrepository "employee-portal/modules/history/repository"
 	historyservice "employee-portal/modules/history/service"
 	"employee-portal/modules/shared"
 )
@@ -44,7 +44,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	addLog(t, empID, userID, "mobile_phone", `"0800000000"`, `"0811111111"`, "8 days")
 	addLog(t, empID, userID, "address", `null`, `"New address"`, "2 days")
 
-	uc := historyservice.New(historyrepo.New(appDB), 90)
+	uc := historyservice.New(historyrepository.New(appDB), 90)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	setHistoryDays(t, "7")
@@ -67,7 +67,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 
 func TestHistory_EmptyStates(t *testing.T) {
 	ctx := context.Background()
-	uc := historyservice.New(historyrepo.New(appDB), 90)
+	uc := historyservice.New(historyrepository.New(appDB), 90)
 
 	// Never edited.
 	userID, empID, _ := newEmployee(t, "0811111111")
@@ -94,7 +94,7 @@ func TestHistory_FilterPagingAndValues(t *testing.T) {
 	addLog(t, empID, userID, "mobile_phone", `"0800000000"`, `"0811111111"`, "3 hours")
 	addLog(t, empID, userID, "address", `null`, `"A"`, "4 hours")
 
-	uc := historyservice.New(historyrepo.New(appDB), 90)
+	uc := historyservice.New(historyrepository.New(appDB), 90)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	res, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: actor, Field: "mobile_phone"})
@@ -127,7 +127,7 @@ func TestHistory_OnlyOwnEmployee(t *testing.T) {
 	userB, empB, _ := newEmployee(t, "0811111111")
 	addLog(t, empB, userB, "address", `null`, `"B's address"`, "1 hour")
 
-	uc := historyservice.New(historyrepo.New(appDB), 90)
+	uc := historyservice.New(historyrepository.New(appDB), 90)
 	res, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: shared.Actor{UserID: userA, EmployeeID: empA}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)

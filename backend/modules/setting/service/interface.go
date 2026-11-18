@@ -7,7 +7,7 @@ import (
 	"employee-portal/modules/shared"
 )
 
-// Repository is the port this service needs; repo.Repository implements it.
+// Repository is the port this service needs; repository.Repository implements it.
 type Repository interface {
 	// Get returns the value with who changed it last; shared.ErrNotFound if missing.
 	Get(ctx context.Context, key string) (value string, s domain.HistorySettings, err error)

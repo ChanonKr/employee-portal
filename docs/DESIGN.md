@@ -35,7 +35,7 @@
 - มี 2 role: `employee`, `admin` — บัญชีถูกสร้างโดย HR/Admin (ไม่มี sign-up)
 - "7 วัน" = ช่วงที่**แสดง** ไม่ใช่ช่วงที่**เก็บ** → เก็บ log `HISTORY_RETENTION_DAYS` วัน (default 90) แล้ว retention job ลบ (§7.9) · ช่วงที่แสดงตั้งได้ไม่เกินช่วงที่เก็บ
 - Change history อยู่ใน PostgreSQL ตัวเดียวกัน เพื่อให้ update + log อยู่ใน transaction เดียว (ไม่แยก Mongo — ดู §11)
-- **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน package `repo`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
+- **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน package `repository`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
 
 ---
 
@@ -44,7 +44,7 @@
 ```
 ┌──────────────────────┐        HTTPS / JSON         ┌─────────────────────────────┐
 │  React SPA (Vite+TS) │ ──────────────────────────▶ │  Go API (Gin)               │
-│  TanStack Query      │ ◀────────────────────────── │  api → service → repo       │
+│  TanStack Query      │ ◀────────────────────────── │  api → service → repository │
 └──────────────────────┘   httpOnly JWT cookie       └──────┬───────────────┬──────┘
                                                              │ GORM (pgx)    │ write/read file
                                                              ▼               ▼
@@ -76,7 +76,7 @@
 
 ## 3. Repository Structure
 
-Backend ใช้ **Clean Architecture แบบ Package by Feature**: 1 feature = 1 โฟลเดอร์ แยก layer เป็น package ย่อย (`domain` · `model` · `repo` · `service` · `api`) และใช้ `shared` กับ `pkg/` ร่วมกัน
+Backend ใช้ **Clean Architecture แบบ Package by Feature**: 1 feature = 1 โฟลเดอร์ แยก layer เป็น package ย่อย (`domain` · `model` · `repository` · `service` · `api`) และใช้ `shared` กับ `pkg/` ร่วมกัน
 
 ```
 employee-portal/
@@ -86,19 +86,19 @@ employee-portal/
 │   ├── modules/
 │   │   ├── server/
 │   │   │   ├── server.go               # gin.Engine, global middleware, Run/Shutdown
-│   │   │   ├── wire.go                 # composition root: ประกอบ repo → service → api ของทุก feature
+│   │   │   ├── wire.go                 # composition root: ประกอบ repository → service → api ของทุก feature
 │   │   │   ├── routes.go               # route table เดียวของทั้งระบบ: group + middleware + handler ทุก endpoint
 │   │   │   └── retention.go            # RunRetention: รัน history retention ตอน start และทุก RETENTION_INTERVAL
 │   │   ├── shared/                     # domain kernel: Actor, Role, RequireAdmin, errors (ErrNotFound, ErrConflict, …, ValidationError), PageRequest
 │   │   ├── auth/                       # ทุก feature มีโครงเดียวกัน:
 │   │   │   ├── domain/                 #   กฎธุรกิจ + type (ไม่มี tag, ไม่ import gin/gorm) + *_test.go
 │   │   │   ├── model/                  #   GORM struct เฉพาะตาราง/คอลัมน์ที่ feature นี้ใช้
-│   │   │   ├── repo/                   #   query ด้วย GORM, แปลง model ↔ domain
+│   │   │   ├── repository/             #   query ด้วย GORM, แปลง model ↔ domain
 │   │   │   ├── service/                #   service.go (ลำดับขั้น + transaction) · interface.go (port: Repository …) · service_test.go
 │   │   │   └── api/                    #   api.go (Gin handler) · dto.go (request/response) · interface.go (Service ที่ api เรียก)
 │   │   ├── profile/                    # Employee, ContactField, ChangeContact/Skills/Photo/Name (รวม PUT /profile/skills)
 │   │   ├── skill/                      # catalog สำหรับ picker + Admin → Skills
-│   │   ├── history/                    # FieldName, Change, ChangeLog, retention rules · GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile) · retention job (service.Retention + repo.RetentionRepository)
+│   │   ├── history/                    # FieldName, Change, ChangeLog, retention rules · GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile) · retention job (service.Retention + repository.RetentionRepository)
 │   │   ├── setting/                    # Admin → Settings (history days)
 │   │   ├── employee/                   # Admin → Employees (list, search, detail) + Dashboard stats
 │   │   └── file/api/                   # GET /files/photos/:name (api อย่างเดียว — stream ไฟล์)
@@ -211,12 +211,12 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 
 ### 5.1 แนวทาง
 - **Logic อยู่ใน Go service**: validation, diff สำหรับ history, ตรวจสิทธิ์, จัดการ transaction
-- **GORM อยู่แค่ใน `repo` และ `model`** — service และ domain ไม่ import GORM · struct ของ GORM (`<feature>/model`) แยกจาก domain และแปลงด้วย `ToDomain()`
+- **GORM อยู่แค่ใน `repository` และ `model`** — service และ domain ไม่ import GORM · struct ของ GORM (`<feature>/model`) แยกจาก domain และแปลงด้วย `ToDomain()`
 - **Schema ไม่ให้ GORM สร้าง**: ตาราง, CHECK, grants (log append-only) และ seed อยู่ใน SQL migration · model ใส่ tag `default` ให้คอลัมน์ที่มีค่า default ใน DB เพื่อไม่ให้ GORM เขียน `false`/`0` ทับ
 - **ทุก service method ที่เขียนข้อมูล** = 1 transaction: lock แถว → update (เช็ก version) → insert log → commit
 - `SkipDefaultTransaction: true` — ไม่ให้ GORM เปิด transaction ซ้อนเอง ทุก transaction มาจาก `WithTx`
 
-### 5.2 Query หลัก (ใน repo)
+### 5.2 Query หลัก (ใน repository)
 | Repository method | GORM | ใช้ที่ |
 |---|---|---|
 | `GetUserByCode` / `GetUserByID` | `Model(&User{}).Joins("LEFT JOIN employees ...").Take` | Login, `/auth/me` |
@@ -234,7 +234,7 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 
 ### 5.3 ตัวอย่าง
 ```go
-// modules/profile/repo/repo.go — optimistic lock: เขียนได้เฉพาะเมื่อ version ยังตรง
+// modules/profile/repository/repository.go — optimistic lock: เขียนได้เฉพาะเมื่อ version ยังตรง
 func (t *txRepository) update(ctx context.Context, e domain.Employee, fields map[string]any) (int32, error) {
     fields["version"] = gorm.Expr("version + 1")
     fields["updated_at"] = gorm.Expr("now()")
@@ -255,7 +255,7 @@ func (t *txRepository) SaveContact(ctx context.Context, e domain.Employee, f dom
     return t.update(ctx, e, map[string]any{col: e.Contact(f)})
 }
 
-// modules/history/repo/repo.go — เงื่อนไขต่อกันตามที่มี (days 0 = admin ไม่จำกัดช่วง)
+// modules/history/repository/repository.go — เงื่อนไขต่อกันตามที่มี (days 0 = admin ไม่จำกัดช่วง)
 db := r.db.WithContext(ctx).Table(model.ChangeLogTable).
     Joins("JOIN users ON users.id = profile_change_logs.changed_by").
     Where("profile_change_logs.employee_id = ?", q.EmployeeID)
@@ -311,7 +311,7 @@ func (svc *Service) UpdateContact(ctx context.Context, in UpdateContactInput) (i
     return newVersion, err
 }
 ```
-- `repo` แปลง GORM model ↔ domain, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น shared error ผ่าน `database.MapError`
+- `repository` แปลง GORM model ↔ domain, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น shared error ผ่าน `database.MapError`
 - ตรวจ version หลัง `FOR UPDATE` → แยก 404 (ไม่มีแถว) กับ 409 (version ไม่ตรง) ได้ชัด
 - Unit test ของ service ใช้ fake repository (in-memory) ส่วน transaction, lock และ rollback จริงทดสอบใน `tests/integration`
 - `SetSkills`: ลำดับเดียวกัน แต่ใช้ `ReplaceSkills` + `BumpVersion` แทน `SaveContact` (รายละเอียด §8)
@@ -439,25 +439,25 @@ Gin router
   → api        : bind JSON, อ่าน If-Match, เรียก Service, เขียน envelope ผ่าน httputil.WriteError
   → service    : ลำดับขั้นของ use case + transaction — ไม่รู้จัก Gin / GORM / pgx
   → domain     : กฎธุรกิจ (normalize, validate, version, diff สำหรับ history)
-  → repo       : query ด้วย GORM, แปลง model ↔ domain, map error → shared error
+  → repository : query ด้วย GORM, แปลง model ↔ domain, map error → shared error
 ```
 
 **Dependency rule** (ลูกศร = import):
 ```
 api ──▶ service ──▶ domain ──▶ shared
            ▲
-repo ──────┘ (implements service.Repository) ──▶ model, pkg/database (GORM)
+repository ┘ (implements service.Repository) ──▶ model, pkg/database (GORM)
 ```
 - `shared` ไม่ import อะไรในโปรเจกต์เลย · `domain` import ได้แค่ `shared` และ `domain` ของ feature อื่น (เช่น profile ใช้ `Skill` ของ skill และ `Change` ของ history)
-- `model` / `repo` / `service` / `api` ไม่ import ของ feature อื่น — คอมไพเลอร์บังคับ layer เพราะแต่ละชั้นเป็นคนละ package (api import repo ไม่ได้โดยไม่เห็นชัดใน import)
-- `modules/server/wire.go` เป็นที่เดียวที่ประกอบ repo → service → api และ `routes.go` เป็น route table เดียว (feature ไม่ register route เอง)
+- `model` / `repository` / `service` / `api` ไม่ import ของ feature อื่น — คอมไพเลอร์บังคับ layer เพราะแต่ละชั้นเป็นคนละ package (api import repository ไม่ได้โดยไม่เห็นชัดใน import)
+- `modules/server/wire.go` เป็นที่เดียวที่ประกอบ repository → service → api และ `routes.go` เป็น route table เดียว (feature ไม่ register route เอง)
 
 **package ในแต่ละ feature**
 | package | หน้าที่ |
 |---|---|
 | `domain` | type + กฎธุรกิจ ทดสอบได้โดยไม่มี DB |
 | `model` | GORM struct **เฉพาะตาราง/คอลัมน์ที่ feature นี้ใช้** (เช่น `auth/model.Employee` มีแค่ 4 field สำหรับสร้างโปรไฟล์ว่าง) + `ToDomain()` |
-| `repo` | `Repository` (GORM) implements `service.Repository` |
+| `repository` | `Repository` (GORM) implements `service.Repository` |
 | `service` | `Service` (ลำดับขั้น + transaction) · `interface.go` = port ที่ service ต้องการ (`Repository`, `TxRepository`, `PhotoProcessor`, …) · input type (`UpdateContactInput` …) |
 | `api` | `API` (Gin handler) · `dto.go` = JSON request/response · `interface.go` = `Service` ที่ api เรียก (fake ได้ใน test) |
 
@@ -510,7 +510,7 @@ func (f ContactField) Normalize(v string) string
 func (f ContactField) Validate(v string) error
 func (f ContactField) LogField() historydomain.FieldName      // mobile → mobile_phone (ชื่อใน history)
 
-// modules/profile/repo/repo.go — ชื่อ column อยู่ใน adapter เท่านั้น
+// modules/profile/repository/repository.go — ชื่อ column อยู่ใน adapter เท่านั้น
 var contactColumn = map[domain.ContactField]string{
     domain.ContactMobile:  "mobile_phone",
     domain.ContactEmail:   "contact_email",
@@ -609,7 +609,7 @@ commit → ลบไฟล์ที่ไม่มีใครใช้ (best-ef
 ```
 - เก็บรูป = รูปปัจจุบัน + ทุกรูปที่อัปโหลดในช่วง retention + อีก 3 รูปก่อนหน้านั้น · `old_value` ของ change ที่เก่าที่สุดที่เหลืออาจชี้ไฟล์ที่ลบแล้ว → UI แสดง placeholder
 - API ยัง serve ได้แม้ retention DB เชื่อมไม่ได้ (log error) — เป็นงาน housekeeping
-- ทดสอบ: unit test ของ service (fake repo) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role)
+- ทดสอบ: unit test ของ service (fake repository) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role)
 - log ทุกรอบ: `retention: purged retentionDays=… deletedChanges=… deletedPhotos=…`
 
 ---
@@ -800,7 +800,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 | Data integrity | update + log ใน transaction เดียว (service + `WithTx`), `SELECT ... FOR UPDATE` + optimistic locking (`version`), CHECK constraint, log append-only ระดับสิทธิ์ DB · retention ลบ log + ไฟล์ใน transaction เดียว แล้วลบไฟล์หลัง commit |
 | Observability | slog JSON, request-id ใน log + error response, `/healthz` (ping DB) |
 | Reliability | graceful shutdown, connection pool ของ GORM (`SetMaxOpenConns(10)`, idle 5 นาที), timeout ต่อ request (context) · retention job ล้มไม่ทำให้ API ล้ม |
-| Testing | Unit (domain + service, fake repo, table-driven) · Integration (testcontainers Postgres + migrations — transaction, lock, rollback, retention, สิทธิ์ DB role จริง) · FE (Vitest + RTL) · E2E (Playwright: login → แก้เบอร์ → เห็นใน Recent changes / history, อัปโหลดรูป + popup, admin) รันหลาย viewport (iPhone 13, iPad, 1280px) |
+| Testing | Unit (domain + service, fake repository, table-driven) · Integration (testcontainers Postgres + migrations — transaction, lock, rollback, retention, สิทธิ์ DB role จริง) · FE (Vitest + RTL) · E2E (Playwright: login → แก้เบอร์ → เห็นใน Recent changes / history, อัปโหลดรูป + popup, admin) รันหลาย viewport (iPhone 13, iPad, 1280px) |
 | CI | GitHub Actions: gofmt, go vet, go test (unit + integration ผ่าน testcontainers), typecheck, vitest, build + docker images ทั้ง api/web, E2E Playwright บน stack จริง, gitleaks |
 | DevEx | `docker compose up` ครั้งเดียวรันได้ครบ, Makefile, `.env.example`, seed users |
 
@@ -840,8 +840,8 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 |---|---|---|
 | PostgreSQL + logic ใน Go service (ไม่ใช้ Stored Procedure) | ตรงทิศทางทีม (ย้ายจาก MySQL SP), test/debug ใน Go ง่าย, logic อยู่ที่เดียวกับโค้ด, ไม่ผูกกับ DB | ต้องจัดการ transaction เองใน service → `WithTx` + integration test |
 | Gin (ไม่ใช่ Fiber) | อยู่บน `net/http` มาตรฐาน: ใช้ `httptest` และ middleware ของ ecosystem ได้, ส่ง `context.Context` ลง pgx ตรง ๆ, ไม่มี pitfall เรื่อง buffer reuse ของ fasthttp | benchmark ช้ากว่า Fiber — ไม่มีผลเพราะคอขวดอยู่ที่ DB และการ resize รูป |
-| GORM (ORM) แทน sqlc | เขียน query ใน Go ได้เลยไม่ต้อง generate, dynamic filter (history, ค้นหาพนักงาน) ต่อ `Where` ได้ตรง ๆ, upsert/locking มี clause ให้, ทีมส่วนใหญ่คุ้นเคย | พฤติกรรมแฝงต้องระวัง: `Updates(struct)` ข้าม zero value (→ ใช้ map), insert เขียน `false`/`0` ทับ DB default (→ tag `default`), query ผิดเจอตอนรันไม่ใช่ตอน build (→ integration test ครอบทุก repository) · ไม่ใช้ AutoMigrate · GORM อยู่แค่ใน `repo`/`model` (เดิมใช้ sqlc แล้วเปลี่ยนได้โดยไม่แตะ service/domain/test ของ service) |
-| Clean Architecture แบบ Package by Feature (1 feature = โฟลเดอร์เดียว, 1 layer = 1 package: `domain` `model` `repo` `service` `api`) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, คอมไพเลอร์บังคับทิศ dependency ระหว่าง layer, กฎธุรกิจอยู่ใน `domain` ทดสอบได้โดยไม่มี DB, route ทั้งหมดอ่านได้ที่ `server/routes.go` ที่เดียว | ชื่อ package ซ้ำกันข้าม feature (`domain`, `service`) → ต้อง alias ตอน import หลาย feature · `domain` ของ feature อ้างกันได้ (profile → skill, history) · feature ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
+| GORM (ORM) แทน sqlc | เขียน query ใน Go ได้เลยไม่ต้อง generate, dynamic filter (history, ค้นหาพนักงาน) ต่อ `Where` ได้ตรง ๆ, upsert/locking มี clause ให้, ทีมส่วนใหญ่คุ้นเคย | พฤติกรรมแฝงต้องระวัง: `Updates(struct)` ข้าม zero value (→ ใช้ map), insert เขียน `false`/`0` ทับ DB default (→ tag `default`), query ผิดเจอตอนรันไม่ใช่ตอน build (→ integration test ครอบทุก repository) · ไม่ใช้ AutoMigrate · GORM อยู่แค่ใน `repository`/`model` (เดิมใช้ sqlc แล้วเปลี่ยนได้โดยไม่แตะ service/domain/test ของ service) |
+| Clean Architecture แบบ Package by Feature (1 feature = โฟลเดอร์เดียว, 1 layer = 1 package: `domain` `model` `repository` `service` `api`) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, คอมไพเลอร์บังคับทิศ dependency ระหว่าง layer, กฎธุรกิจอยู่ใน `domain` ทดสอบได้โดยไม่มี DB, route ทั้งหมดอ่านได้ที่ `server/routes.go` ที่เดียว | ชื่อ package ซ้ำกันข้าม feature (`domain`, `service`) → ต้อง alias ตอน import หลาย feature · `domain` ของ feature อ้างกันได้ (profile → skill, history) · feature ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
 | Transaction + `FOR UPDATE` + `version` | กันแก้ทับกัน, แยก 404/409 ชัด, log ไม่หลุดจาก update | lock แถวสั้น ๆ ระหว่าง transaction (ไม่มีผลที่ scale นี้) |
 | History เขียนใน service (ไม่ใช้ DB trigger) | diff ที่อ่านง่าย (skills เป็นชื่อ), รู้ว่าใครแก้จาก context, test ใน Go ได้ | ถ้ามีคนแก้ DB ตรง ๆ จะไม่มี log → ชดเชยด้วยสิทธิ์ DB role `app` (trigger เป็นทางเลือกในอนาคต) |
 | History append-only ด้วยสิทธิ์ DB | audit เชื่อถือได้ แม้แอปมีบั๊ก | retention job ต้องใช้ role แยก (`retention`) และ connection แยก |

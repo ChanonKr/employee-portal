@@ -23,7 +23,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"gorm.io/gorm"
 
-	profilerepo "employee-portal/modules/profile/repo"
+	profilerepository "employee-portal/modules/profile/repository"
 	profileservice "employee-portal/modules/profile/service"
 	"employee-portal/pkg/database"
 	"employee-portal/pkg/imaging"
@@ -156,7 +156,7 @@ func newProfileServiceWithDir(t *testing.T) (*profileservice.Service, string) {
 		t.Fatalf("storage: %v", err)
 	}
 	return profileservice.New(profileservice.Deps{
-		Repo:   profilerepo.New(appDB),
+		Repo:   profilerepository.New(appDB),
 		Photos: imaging.NewProcessor(5 << 20),
 		Files:  files,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),

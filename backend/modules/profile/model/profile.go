@@ -2,10 +2,10 @@
 //
 // The rules for every feature's model package: the structs mirror the SQL
 // migrations (GORM never migrates the schema) and stay inside the feature. Other
-// features declare their own structs for what they need, so model and repo
+// features declare their own structs for what they need, so model and repository
 // packages never import another feature's. Fields with a database default carry
 // a `default` tag so GORM leaves them out of INSERTs instead of writing the Go
-// zero value. Only repo uses these; it converts them with ToDomain.
+// zero value. Only repository uses these; it converts them with ToDomain.
 package model
 
 import (

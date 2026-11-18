@@ -160,18 +160,18 @@ backend/
 │   ├── auth/ profile/ skill/ history/ setting/ employee/
 │   │   ├── domain/           business rules and types (no framework imports)
 │   │   ├── model/            GORM structs for this feature's tables
-│   │   ├── repo/             GORM queries; model ↔ domain
+│   │   ├── repository/       GORM queries; model ↔ domain
 │   │   ├── service/          use cases + transactions; interface.go = ports it needs (Repository …)
 │   │   └── api/              Gin handlers + DTOs; interface.go = the Service it calls
 │   ├── file/api/             streams stored photos (no other layers)
-│   └── server/               wire.go builds repo → service → api; routes.go is the one route table;
+│   └── server/               wire.go builds repository → service → api; routes.go is the one route table;
 │                             retention.go runs the history retention job
 └── pkg/                      database (GORM, migrations), middleware, httputil, security, storage, imaging
 ```
 
-Dependencies point inward: `api → service → domain`, `repo → service (ports), model, domain`.
+Dependencies point inward: `api → service → domain`, `repository → service (ports), model, domain`.
 A feature's `domain` may import another feature's `domain` (profile uses skill and history),
-but `model`, `repo`, `service` and `api` never import another feature's.
+but `model`, `repository`, `service` and `api` never import another feature's.
 
 ## License
 

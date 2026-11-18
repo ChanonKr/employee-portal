@@ -1,6 +1,6 @@
 // Package model holds the read-only row shapes for the admin directory and
 // dashboard (see modules/profile/model for the rules). Queries name their tables
-// explicitly; only repo uses these.
+// explicitly; only repository uses these.
 package model
 
 import "time"

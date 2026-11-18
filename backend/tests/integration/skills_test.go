@@ -13,7 +13,7 @@ import (
 
 	profileservice "employee-portal/modules/profile/service"
 	"employee-portal/modules/shared"
-	skillrepo "employee-portal/modules/skill/repo"
+	skillrepository "employee-portal/modules/skill/repository"
 	skillservice "employee-portal/modules/skill/service"
 )
 
@@ -96,7 +96,7 @@ func TestSetSkills_InactiveSkill(t *testing.T) {
 	assert.ElementsMatch(t, []int64{active, retired}, employeeSkillIDs(t, empID))
 
 	// It is still hidden from the picker.
-	catalog, err := skillservice.New(skillrepo.New(appDB)).ListActive(ctx)
+	catalog, err := skillservice.New(skillrepository.New(appDB)).ListActive(ctx)
 	require.NoError(t, err)
 	for _, s := range catalog {
 		assert.NotEqual(t, retired, s.ID)

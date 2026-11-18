@@ -1,5 +1,5 @@
 // Package api serves stored photos. The file feature has no domain, service or
-// repo: it only streams a file by name, and pkg/storage already validates the name.
+// repository: it only streams a file by name, and pkg/storage already validates the name.
 package api
 
 import (

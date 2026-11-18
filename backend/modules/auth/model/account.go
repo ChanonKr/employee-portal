@@ -1,5 +1,5 @@
 // Package model holds the GORM structs auth reads and writes (see
-// modules/profile/model for the rules); only repo uses them.
+// modules/profile/model for the rules); only repository uses them.
 package model
 
 import "time"

@@ -1,5 +1,5 @@
 // Package model holds the GORM structs for the skill catalog. They mirror the SQL
-// migrations (GORM never migrates the schema) and are used only by repo.
+// migrations (GORM never migrates the schema) and are used only by repository.
 package model
 
 import (

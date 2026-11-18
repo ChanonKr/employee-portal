@@ -1,4 +1,4 @@
-// Package model holds the GORM structs for app settings; only repo uses them.
+// Package model holds the GORM structs for app settings; only repository uses them.
 package model
 
 import "time"
