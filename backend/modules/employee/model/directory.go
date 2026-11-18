@@ -1,11 +1,11 @@
-package employee
+// Package model holds the read-only row shapes for the admin directory and
+// dashboard (see modules/profile/model for the rules). Queries name their tables
+// explicitly; only repo uses these.
+package model
 
 import "time"
 
-// Read-only views for the admin directory and dashboard
-// (see profile/model.go for the rules). Queries name their tables explicitly.
-
-type summaryRow struct {
+type SummaryRow struct {
 	ID           int64
 	EmployeeCode string
 	FirstName    string
@@ -15,7 +15,7 @@ type summaryRow struct {
 	IsActive     bool
 }
 
-type detailRow struct {
+type DetailRow struct {
 	ID           int64
 	UserID       int64
 	FirstName    string
@@ -30,19 +30,19 @@ type detailRow struct {
 	IsActive     bool
 }
 
-type skillRow struct {
+type SkillRow struct {
 	ID       int64
 	Name     string
 	IsActive bool
 }
 
-type topSkillRow struct {
+type TopSkillRow struct {
 	ID     int64
 	Name   string
 	UsedBy int64
 }
 
-type recentChangeRow struct {
+type RecentChangeRow struct {
 	ID            int64
 	EmployeeID    int64
 	EmployeeCode  string

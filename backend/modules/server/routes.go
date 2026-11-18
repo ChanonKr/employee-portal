@@ -8,7 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"employee-portal/modules/auth"
-	"employee-portal/modules/employee"
+	employeeapi "employee-portal/modules/employee/api"
+	employeerepo "employee-portal/modules/employee/repo"
+	employeeservice "employee-portal/modules/employee/service"
 	"employee-portal/modules/file"
 	historyapi "employee-portal/modules/history/api"
 	historyrepo "employee-portal/modules/history/repo"
@@ -57,8 +59,13 @@ func (s *Server) routes() {
 		Log:    s.log,
 	})).RegisterRoutes(r, s.cfg.UploadMaxBytes)
 
-	employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.db))).RegisterRoutes(r)
 	file.NewHandler(s.files).RegisterRoutes(r)
+
+	// Admin directory and dashboard (read-only; edits go through profile).
+	employees := employeeapi.New(employeeservice.New(employeerepo.New(s.db)))
+	r.Admin.GET("/stats", employees.Stats)
+	r.Admin.GET("/employees", employees.List)
+	r.Admin.GET("/employees/:id", employees.Get)
 
 	// History is read-only; writes happen inside the profile transactions.
 	history := historyapi.New(historyservice.New(historyrepo.New(s.db), s.cfg.HistoryDays))

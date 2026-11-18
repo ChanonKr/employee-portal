@@ -1,11 +1,13 @@
-package employee
+package repo
 
 import (
 	"context"
 
 	"gorm.io/gorm"
 
-	employeedomain "employee-portal/modules/employee/domain"
+	"employee-portal/modules/employee/domain"
+	"employee-portal/modules/employee/model"
+	"employee-portal/modules/employee/service"
 	historydomain "employee-portal/modules/history/domain"
 	profiledomain "employee-portal/modules/profile/domain"
 	"employee-portal/modules/shared"
@@ -13,12 +15,15 @@ import (
 	"employee-portal/pkg/database"
 )
 
-type repository struct {
+// Repository implements service.Repository with GORM.
+type Repository struct {
 	db *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) Repository {
-	return &repository{db: db}
+var _ service.Repository = (*Repository)(nil)
+
+func New(db *gorm.DB) *Repository {
+	return &Repository{db: db}
 }
 
 // withUser joins each employee to their account (code, role, active).
@@ -37,7 +42,7 @@ func matching(pattern *string) func(*gorm.DB) *gorm.DB {
 	}
 }
 
-func (r *repository) List(ctx context.Context, q employeedomain.EmployeeQuery) ([]employeedomain.EmployeeSummary, int64, error) {
+func (r *Repository) List(ctx context.Context, q domain.EmployeeQuery) ([]domain.EmployeeSummary, int64, error) {
 	db := r.db.WithContext(ctx)
 	filter := matching(q.LikePattern())
 
@@ -46,7 +51,7 @@ func (r *repository) List(ctx context.Context, q employeedomain.EmployeeQuery) (
 		return nil, 0, database.MapError(err)
 	}
 
-	var rows []summaryRow
+	var rows []model.SummaryRow
 	err := db.Scopes(withUser, filter).
 		Select("employees.id, users.employee_code, employees.first_name, employees.last_name, employees.photo_path, users.role, users.is_active").
 		Order("employees.first_name").Order("employees.last_name").Order("employees.id").
@@ -56,9 +61,9 @@ func (r *repository) List(ctx context.Context, q employeedomain.EmployeeQuery) (
 		return nil, 0, database.MapError(err)
 	}
 
-	items := make([]employeedomain.EmployeeSummary, len(rows))
+	items := make([]domain.EmployeeSummary, len(rows))
 	for i, row := range rows {
-		items[i] = employeedomain.EmployeeSummary{
+		items[i] = domain.EmployeeSummary{
 			ID: row.ID, EmployeeCode: row.EmployeeCode, FirstName: row.FirstName, LastName: row.LastName,
 			PhotoPath: row.PhotoPath, Role: shared.Role(row.Role), IsActive: row.IsActive,
 		}
@@ -66,26 +71,26 @@ func (r *repository) List(ctx context.Context, q employeedomain.EmployeeQuery) (
 	return items, total, nil
 }
 
-func (r *repository) Get(ctx context.Context, id int64) (employeedomain.EmployeeDetail, error) {
+func (r *Repository) Get(ctx context.Context, id int64) (domain.EmployeeDetail, error) {
 	db := r.db.WithContext(ctx)
-	var row detailRow
+	var row model.DetailRow
 	err := db.Scopes(withUser).
 		Select("employees.*, users.employee_code, users.role, users.is_active").
 		Where("employees.id = ?", id).
 		Take(&row).Error
 	if err != nil {
-		return employeedomain.EmployeeDetail{}, database.MapError(err)
+		return domain.EmployeeDetail{}, database.MapError(err)
 	}
-	var skills []skillRow
+	var skills []model.SkillRow
 	err = db.Table("skills").Select("skills.id, skills.name, skills.is_active").
 		Joins("JOIN employee_skills es ON es.skill_id = skills.id").
 		Where("es.employee_id = ?", id).
 		Order("skills.sort_order").Order("skills.name").
 		Find(&skills).Error
 	if err != nil {
-		return employeedomain.EmployeeDetail{}, database.MapError(err)
+		return domain.EmployeeDetail{}, database.MapError(err)
 	}
-	d := employeedomain.EmployeeDetail{
+	d := domain.EmployeeDetail{
 		Profile: profiledomain.Profile{
 			Employee: profiledomain.Employee{
 				ID: row.ID, UserID: row.UserID, FirstName: row.FirstName, LastName: row.LastName,
@@ -104,7 +109,7 @@ func (r *repository) Get(ctx context.Context, id int64) (employeedomain.Employee
 	return d, nil
 }
 
-func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (employeedomain.DashboardStats, error) {
+func (r *Repository) Stats(ctx context.Context, topSkills, recentChanges int) (domain.DashboardStats, error) {
 	db := r.db.WithContext(ctx)
 
 	// "Complete" matches the profile checklist: photo, all contact fields, at least one skill.
@@ -116,10 +121,10 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		    AND EXISTS (SELECT 1 FROM employee_skills es WHERE es.employee_id = employees.id)
 		) AS complete`).Take(&counts).Error
 	if err != nil {
-		return employeedomain.DashboardStats{}, database.MapError(err)
+		return domain.DashboardStats{}, database.MapError(err)
 	}
 
-	var top []topSkillRow
+	var top []model.TopSkillRow
 	err = db.Table("employee_skills").
 		Select("skills.id, skills.name, count(*) AS used_by").
 		Joins("JOIN skills ON skills.id = employee_skills.skill_id").
@@ -128,10 +133,10 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		Limit(topSkills).
 		Find(&top).Error
 	if err != nil {
-		return employeedomain.DashboardStats{}, database.MapError(err)
+		return domain.DashboardStats{}, database.MapError(err)
 	}
 
-	var recent []recentChangeRow
+	var recent []model.RecentChangeRow
 	err = db.Table("profile_change_logs").
 		Select("profile_change_logs.id, profile_change_logs.employee_id, u.employee_code, e.first_name, e.last_name, " +
 			"profile_change_logs.field, profile_change_logs.changed_at, cb.role AS changed_by_role").
@@ -142,20 +147,20 @@ func (r *repository) Stats(ctx context.Context, topSkills, recentChanges int) (e
 		Limit(recentChanges).
 		Find(&recent).Error
 	if err != nil {
-		return employeedomain.DashboardStats{}, database.MapError(err)
+		return domain.DashboardStats{}, database.MapError(err)
 	}
 
-	s := employeedomain.DashboardStats{
+	s := domain.DashboardStats{
 		Employees:        counts.Total,
 		CompleteProfiles: counts.Complete,
-		TopSkills:        make([]employeedomain.SkillCount, len(top)),
-		RecentChanges:    make([]employeedomain.RecentChange, len(recent)),
+		TopSkills:        make([]domain.SkillCount, len(top)),
+		RecentChanges:    make([]domain.RecentChange, len(recent)),
 	}
 	for i, t := range top {
-		s.TopSkills[i] = employeedomain.SkillCount{Skill: skilldomain.Skill{ID: t.ID, Name: t.Name}, UsedBy: t.UsedBy}
+		s.TopSkills[i] = domain.SkillCount{Skill: skilldomain.Skill{ID: t.ID, Name: t.Name}, UsedBy: t.UsedBy}
 	}
 	for i, c := range recent {
-		s.RecentChanges[i] = employeedomain.RecentChange{
+		s.RecentChanges[i] = domain.RecentChange{
 			ID: c.ID, EmployeeID: c.EmployeeID, EmployeeCode: c.EmployeeCode,
 			FirstName: c.FirstName, LastName: c.LastName, Field: historydomain.FieldName(c.Field),
 			ChangedAt: c.ChangedAt, ChangedByRole: shared.Role(c.ChangedByRole),
