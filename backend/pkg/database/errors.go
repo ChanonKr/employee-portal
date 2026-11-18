@@ -17,7 +17,7 @@ const (
 	codeForeignKeyViolation = "23503"
 )
 
-// MapError turns driver errors into domain errors so use cases never see GORM or pgx types.
+// MapError turns driver errors into domain errors so services never see GORM or pgx types.
 func MapError(err error) error {
 	if err == nil {
 		return nil

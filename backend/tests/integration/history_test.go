@@ -56,7 +56,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	assert.Equal(t, "New address", res.Items[0].New)
 	assert.True(t, res.HasOlder)
 
-	setHistoryDays(t, "10") // same use case instance: no restart
+	setHistoryDays(t, "10") // same service instance: no restart
 	res, err = uc.ListOwn(ctx, historyservice.ListInput{Actor: actor})
 	require.NoError(t, err)
 	assert.Equal(t, 10, res.Days)

@@ -50,7 +50,7 @@ func TestEmployee_ChangeContact(t *testing.T) {
 		e := Employee{Version: 5, Address: ptr("old")}
 		_, err := e.ChangeContact(ContactAddress, "new", 4)
 		assert.ErrorIs(t, err, shared.ErrConflict)
-		assert.Equal(t, "old", *e.Address, "entity must not change on error")
+		assert.Equal(t, "old", *e.Address, "employee must not change on error")
 	})
 
 	t.Run("invalid value is reported before version", func(t *testing.T) {

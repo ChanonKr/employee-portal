@@ -24,7 +24,7 @@ type Result struct {
 	HasNext  bool
 }
 
-// Service runs this feature's use cases. It never imports GORM or Gin.
+// Service runs the change history use cases. It never imports GORM or Gin.
 type Service struct {
 	repo         Repository
 	fallbackDays int // HISTORY_DAYS from env, used when the setting is missing or invalid

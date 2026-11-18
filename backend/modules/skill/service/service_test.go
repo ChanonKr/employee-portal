@@ -40,7 +40,7 @@ var (
 func strp(s string) *string { return &s }
 func boolp(b bool) *bool    { return &b }
 
-func TestAdminUseCasesRejectEmployees(t *testing.T) {
+func TestAdminMethodsRejectEmployees(t *testing.T) {
 	ctx := context.Background()
 	repo := &fakeRepo{}
 	svc := New(repo)

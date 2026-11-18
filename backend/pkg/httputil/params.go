@@ -8,7 +8,7 @@ import (
 	"employee-portal/modules/shared"
 )
 
-// QueryInt returns 0 when the parameter is absent so the use case applies its default.
+// QueryInt returns 0 when the parameter is absent so the service applies its default.
 func QueryInt(c *gin.Context, name string) (int, error) {
 	s := c.Query(name)
 	if s == "" {

@@ -10,7 +10,7 @@ import (
 	"employee-portal/pkg/middleware"
 )
 
-// API is the HTTP adapter for this feature. Routes are registered in modules/server.
+// API is the HTTP adapter for change history. Routes are registered in modules/server.
 type API struct {
 	svc Service
 }

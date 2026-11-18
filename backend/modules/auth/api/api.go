@@ -17,7 +17,7 @@ type CookieOptions struct {
 	Secure bool // true in production (HTTPS only)
 }
 
-// API is the HTTP adapter for this feature. Routes are registered in modules/server.
+// API is the HTTP adapter for auth. Routes are registered in modules/server.
 type API struct {
 	svc    Service
 	cookie CookieOptions

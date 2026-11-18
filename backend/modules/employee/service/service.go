@@ -1,5 +1,5 @@
 // Package service runs the admin directory: list, search, detail and dashboard stats.
-// Editing a profile (including the admin-only name change) stays in module profile,
+// Editing a profile (including the admin-only name change) stays in the profile feature,
 // which owns the row lock, version and change log.
 package service
 
@@ -27,7 +27,7 @@ type ListResult struct {
 	Total int64
 }
 
-// Service runs this feature's use cases. It never imports GORM or Gin.
+// Service runs the admin directory use cases. It never imports GORM or Gin.
 type Service struct {
 	repo Repository
 }

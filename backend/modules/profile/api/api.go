@@ -13,7 +13,7 @@ import (
 	"employee-portal/pkg/middleware"
 )
 
-// API is the HTTP adapter for this feature. Routes are registered in modules/server.
+// API is the HTTP adapter for profile. Routes are registered in modules/server.
 type API struct {
 	svc Service
 }

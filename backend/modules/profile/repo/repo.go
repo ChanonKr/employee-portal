@@ -150,7 +150,7 @@ func (t *txRepository) GetSkillsByIDs(ctx context.Context, ids []int64) ([]skill
 	if len(ids) == 0 {
 		return []skilldomain.Skill{}, nil
 	}
-	// Includes inactive skills so the use case can tell "unknown" from "inactive".
+	// Includes inactive skills so the service can tell "unknown" from "inactive".
 	var rows []model.Skill
 	if err := t.db.WithContext(ctx).Where("id IN ?", ids).Scopes(model.SkillOrder).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)

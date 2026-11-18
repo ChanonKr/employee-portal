@@ -45,7 +45,7 @@ type Deps struct {
 	Log    *slog.Logger
 }
 
-// Service runs this feature's use cases. It never imports GORM or Gin.
+// Service runs the profile use cases. It never imports GORM or Gin.
 type Service struct {
 	repo   Repository
 	photos PhotoProcessor
