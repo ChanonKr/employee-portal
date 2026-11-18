@@ -6,6 +6,7 @@ import type { Profile } from '@/api/types'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { ViewablePhoto } from '@/components/ui/photo-viewer'
 import { useUploadPhoto } from './api'
 
 const MAX_BYTES = 5 * 1024 * 1024
@@ -55,7 +56,9 @@ export function ProfileHeader({ profile }: { profile: Profile }) {
     <Card className="flex flex-col items-center gap-4 text-center">
       <div className="relative rounded-full">
         {hasPhoto ? (
-          <Avatar url={pending?.url ?? profile.photoUrl} firstName={profile.firstName} lastName={profile.lastName} className="size-28" />
+          <ViewablePhoto url={(pending?.url ?? profile.photoUrl)!} label={pending ? 'Photo preview' : 'Profile photo'}>
+            <Avatar url={pending?.url ?? profile.photoUrl} firstName={profile.firstName} lastName={profile.lastName} className="size-28" />
+          </ViewablePhoto>
         ) : (
           <button
             type="button"

@@ -123,6 +123,17 @@ describe('checklist', () => {
     expect(puts()[0]?.[0]).toBe('/api/v1/profile/photo')
   })
 
+  it('tapping the profile photo opens it large in a popup', async () => {
+    server({ ...empty, photoUrl: '/api/v1/files/photos/me.jpg' })
+    renderRoute(<ProfilePage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'View profile photo' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('img', { name: 'Profile photo' })).toHaveAttribute('src', '/api/v1/files/photos/me.jpg')
+    expect(within(dialog).queryByRole('button', { name: 'Next photo' })).not.toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('dropping a file on the picture does nothing', async () => {
     const fetch = server(empty)
     renderRoute(<ProfilePage />)

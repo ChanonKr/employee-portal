@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { HistoryItem } from '@/api/types'
 import { mockFetch, renderRoute } from '@/test/render'
@@ -61,8 +61,19 @@ describe('HistoryPage', () => {
     expect(before).toHaveAttribute('src', '/api/v1/files/photos/old.jpg')
     expect(screen.getByAltText('New photo')).toHaveAttribute('src', '/api/v1/files/photos/new.jpg')
 
+    // Tap a thumbnail: a popup shows it large, and the arrow moves to the other photo.
+    await userEvent.click(screen.getByRole('button', { name: 'View new photo' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('New photo')).toBeInTheDocument()
+    expect(within(dialog).getByRole('img', { name: 'New photo' })).toHaveAttribute('src', '/api/v1/files/photos/new.jpg')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Previous photo' }))
+    expect(within(dialog).getByRole('img', { name: 'Previous photo' })).toHaveAttribute('src', '/api/v1/files/photos/old.jpg')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
     fireEvent.error(before) // the retention job deleted the old file
     expect(await screen.findByText('Previous photo is no longer kept')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View previous photo' })).not.toBeInTheDocument()
   })
 
   it('empty state uses the API window', async () => {

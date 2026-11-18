@@ -47,13 +47,27 @@ test('choose skills and upload a photo', async ({ signedIn: page }) => {
   await expect(page.getByText('Skills saved')).toBeVisible()
   await expect(page.getByRole('list', { name: 'Your skills' }).getByText('React')).toBeVisible()
 
-  await page.getByLabel('Profile photo').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: tinyPng() })
+  await page.getByLabel('Profile photo', { exact: true }).setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: tinyPng() })
   // Choosing only previews; nothing is uploaded until "Save photo".
   await expect(page.getByRole('button', { name: 'Save photo' })).toBeVisible()
   await expect(page.getByText('Photo updated')).toHaveCount(0)
   await page.getByRole('button', { name: 'Save photo' }).click()
   await expect(page.getByText('Photo updated')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Change photo' })).toBeVisible()
+
+  // Tap the photo to see it large; the same works from the history.
+  await page.getByRole('button', { name: 'View profile photo' }).click()
+  const big = page.getByRole('dialog').getByRole('img', { name: 'Profile photo' })
+  await expect(big).toBeVisible()
+  expect(await big.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.goto('/history')
+  await page.getByRole('button', { name: 'View new photo' }).first().click()
+  await expect(page.getByRole('dialog').getByRole('img', { name: 'New photo' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 test('no horizontal scroll on the main pages', async ({ signedIn: page }) => {

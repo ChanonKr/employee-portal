@@ -9,6 +9,7 @@ import { api, isApiError } from '@/api/client'
 import type { EmployeeDetail, HistoryPage } from '@/api/types'
 import { ErrorAlert } from '@/components/ui/alert'
 import { Avatar } from '@/components/ui/avatar'
+import { ViewablePhoto } from '@/components/ui/photo-viewer'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardTitle } from '@/components/ui/card'
@@ -71,7 +72,13 @@ function Overview({ e }: { e: EmployeeDetail }) {
   ]
   return (
     <Card className="flex flex-col gap-4 sm:flex-row sm:items-start">
-      <Avatar url={e.photoUrl} firstName={e.firstName} lastName={e.lastName} className="size-20 text-xl" />
+      {e.photoUrl ? (
+        <ViewablePhoto url={e.photoUrl} label={`${e.firstName} ${e.lastName}`} buttonLabel="View photo" className="self-start">
+          <Avatar url={e.photoUrl} firstName={e.firstName} lastName={e.lastName} className="size-20 text-xl" />
+        </ViewablePhoto>
+      ) : (
+        <Avatar url={null} firstName={e.firstName} lastName={e.lastName} className="size-20 text-xl" />
+      )}
       <div className="min-w-0 flex-1 space-y-3">
         <div>
           <h1 className="text-xl font-semibold break-words">

@@ -523,6 +523,7 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
 - เกินขนาด → 413 `PAYLOAD_TOO_LARGE` · ไม่ใช่ jpeg/png/webp (ดูจาก magic bytes ไม่ใช่นามสกุล) → 415 `UNSUPPORTED_MEDIA_TYPE` · ไฟล์เสีย → 400
 - `GET /files/photos/:name` ต้อง login · ชื่อไฟล์ต้องตรง `<uuid>.jpg` ไม่งั้น 404 (กัน path traversal) · `Cache-Control: private, max-age=31536000, immutable` (ชื่อไม่ซ้ำต่อการอัปโหลด)
 - history ของ photo เก็บชื่อไฟล์ (`old_value` / `new_value`) · API history แปลงเป็น URL `/api/v1/files/photos/<name>` · ไฟล์ที่ถูกลบแล้ว UI แสดง placeholder
+- กดรูป (รูปโปรไฟล์, รูปใน History, รูปในหน้า admin ของพนักงาน) → popup รูปใหญ่ (`PhotoViewer`) · ใน History เลื่อนดูรูปเก่า ↔ ใหม่ได้ด้วยลูกศรหรือปุ่ม ←/→ · ปิดด้วย Esc / ปุ่มปิด / แตะนอกรูป
 
 ### 7.6 Auth & RBAC
 - Login: `GetUserByCode` → ตรวจ `is_active` → `bcrypt.CompareHashAndPassword` → ออก JWT (HS256, `sub=user_id`, `emp=employee_id`, `role`, exp 8 ชม.)
