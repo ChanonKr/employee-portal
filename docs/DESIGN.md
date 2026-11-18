@@ -14,7 +14,7 @@
 | F3 | อัปโหลดรูปโปรไฟล์ | multipart, ตรวจ magic bytes, resize |
 | F4 | แก้ข้อมูลติดต่อ **แยกทีละ field** (Mobile, Email, Address) | 1 field = 1 request, มี version ป้องกันการเขียนทับ |
 | F5 | เลือก Skills ได้หลายตัว จากรายการที่ **configurable** | รายการอยู่ในตาราง `skills` (seed จาก config) |
-| F6 | ดูประวัติการแก้ไขย้อนหลัง **7 วัน — configurable** | ค่าใน `app_settings.history_days` (fallback: env `HISTORY_DAYS`) |
+| F6 | ดูประวัติการแก้ไขย้อนหลัง **7 วัน — configurable** | ช่วงที่แสดง = `app_settings.history_days` (admin ตั้ง, default 7) · ช่วงที่เก็บ = env `HISTORY_RETENTION_DAYS` (default 90) |
 
 ### 1.2 Extra Features (ผู้สมัครเพิ่มเอง)
 | # | Feature | ลำดับ |
@@ -33,7 +33,7 @@
 ### 1.4 Assumptions
 - มีระบบ Login แบบง่าย (seed users) — login ด้วย `employee_code` ไม่ใช้อีเมลติดต่อ เพราะอีเมลแก้ไขได้
 - มี 2 role: `employee`, `admin` — บัญชีถูกสร้างโดย HR/Admin (ไม่มี sign-up)
-- "7 วัน" = ช่วงที่**แสดง** ไม่ใช่ช่วงที่**เก็บ** → เก็บ log ทั้งหมด, purge เป็น optional job
+- "7 วัน" = ช่วงที่**แสดง** ไม่ใช่ช่วงที่**เก็บ** → เก็บ log `HISTORY_RETENTION_DAYS` วัน (default 90) แล้ว retention job ลบ (§7.9) · ช่วงที่แสดงตั้งได้ไม่เกินช่วงที่เก็บ
 - Change history อยู่ใน PostgreSQL ตัวเดียวกัน เพื่อให้ update + log อยู่ใน transaction เดียว (ไม่แยก Mongo — ดู §12)
 - **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน package `repo`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
 
@@ -351,8 +351,8 @@ func (svc *Service) UpdateContact(ctx context.Context, in UpdateContactInput) (i
 | POST | `/admin/skills` | `{name}` (trim + ยุบช่องว่าง, 1–50 ตัว) | 201 `{id}` · ต่อท้ายรายการ · 409 `ALREADY_EXISTS` ถ้าชื่อซ้ำ (ไม่สนตัวพิมพ์) |
 | PATCH | `/admin/skills/:id` | `{name?, isActive?}` (ต้องมีอย่างน้อย 1) | 204 · 404 id ไม่มี · 409 ชื่อซ้ำ |
 | PUT | `/admin/skills/order` | `[{id, sortOrder}]` | 204 · id ไม่รู้จักแม้ตัวเดียว → 404 และไม่มีอะไรเปลี่ยน (transaction) |
-| GET | `/admin/settings` | – | `{historyDays, updatedBy: {id, employeeCode} \| null, updatedAt \| null}` |
-| PUT | `/admin/settings/history-days` | `{value}` (จำนวนเต็ม 1–365) | 204 · มีผลกับ `/profile/history` ทันที |
+| GET | `/admin/settings` | – | `{historyDays, maxHistoryDays, updatedBy: {id, employeeCode} \| null, updatedAt \| null}` · `maxHistoryDays` = `HISTORY_RETENTION_DAYS` |
+| PUT | `/admin/settings/history-days` | `{value}` (จำนวนเต็ม 1 ถึง `maxHistoryDays`) | 204 · มีผลกับ `/profile/history` ทันที |
 
 module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · รายชื่อ/รายละเอียด/stats อยู่ใน `employee/` · history ของ admin อยู่ใน `history/` · แก้ชื่ออยู่ใน `profile/` (ใช้ lock + version + log เดียวกับการแก้โปรไฟล์) · ทุก admin service method เรียก `shared.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
 | GET | `/admin/employees` | `?q=&page=&pageSize=` · `q` ค้นรหัสพนักงานหรือ "ชื่อ นามสกุล" (ไม่สนตัวพิมพ์, `%` `_` ที่พิมพ์มาเป็นตัวอักษรธรรมดา) | `{items: [{id, employeeCode, firstName, lastName, photoUrl, role, isActive}], page: {page, pageSize, hasNext}, total}` |
@@ -517,12 +517,12 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
 2. storage.Save()                         → <uuid>.jpg (เขียน temp แล้ว rename)
 3. tx: lock → emp.ChangePhoto(name, version) → SavePhoto → AppendChange
    ├─ error → storage.Delete(new)         (ไม่เหลือไฟล์กำพร้า) → return error
-   └─ ok    → storage.Delete(old)         (best-effort, log ถ้าพลาด)
+   └─ ok    → เก็บไฟล์เดิมไว้                (history แสดงรูปเก่า → ใหม่ · retention job ลบภายหลัง §7.9)
 ```
 - Body limit แยก route: JSON 64 KB · `PUT /profile/photo` = `UPLOAD_MAX_BYTES` + 64 KB (หัว multipart) · rate limit 10 ครั้ง/นาที/ผู้ใช้
 - เกินขนาด → 413 `PAYLOAD_TOO_LARGE` · ไม่ใช่ jpeg/png/webp (ดูจาก magic bytes ไม่ใช่นามสกุล) → 415 `UNSUPPORTED_MEDIA_TYPE` · ไฟล์เสีย → 400
 - `GET /files/photos/:name` ต้อง login · ชื่อไฟล์ต้องตรง `<uuid>.jpg` ไม่งั้น 404 (กัน path traversal) · `Cache-Control: private, max-age=31536000, immutable` (ชื่อไม่ซ้ำต่อการอัปโหลด)
-- history ของ photo เก็บชื่อไฟล์ (`old_value` / `new_value`)
+- history ของ photo เก็บชื่อไฟล์ (`old_value` / `new_value`) · API history แปลงเป็น URL `/api/v1/files/photos/<name>` · ไฟล์ที่ถูกลบแล้ว UI แสดง placeholder
 
 ### 7.6 Auth & RBAC
 - Login: `GetUserByCode` → ตรวจ `is_active` → `bcrypt.CompareHashAndPassword` → ออก JWT (HS256, `sub=user_id`, `emp=employee_id`, `role`, exp 8 ชม.)
@@ -550,7 +550,9 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
 | `DATABASE_URL` | – (**required**) | เชื่อมด้วย role `app` (compose ใส่ให้) |
 | `JWT_SECRET` | – (**required**, ≥ 32 ตัวอักษร, ไม่มีค่า default) | `make env` สุ่มให้ |
 | `JWT_TTL` | `8h` | |
-| `HISTORY_DAYS` | `7` | **F6** — ค่า fallback ถ้าไม่มีใน `app_settings` (ค่าจริงแก้ได้จากหน้า Admin) |
+| `HISTORY_RETENTION_DAYS` | `90` | เก็บ history กี่วัน (1–3650) · ช่วงที่**แสดง**คือ `app_settings.history_days` (admin ตั้ง ≤ ค่านี้, ไม่มีค่า → 7) |
+| `RETENTION_DATABASE_URL` | (ว่าง = ปิด job) | retention job เชื่อมด้วย role `retention` (compose ใส่ให้) |
+| `RETENTION_INTERVAL` | `24h` | รอบของ retention job (รันครั้งแรกตอน start) |
 | `UPLOAD_DIR` | `/data/uploads` | |
 | `UPLOAD_MAX_BYTES` | `5242880` | |
 | `CORS_ORIGINS` | `http://localhost:5173` | |
@@ -569,7 +571,21 @@ GRANT SELECT, INSERT ON profile_change_logs TO app;          -- ไม่มี 
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app;
 ```
 - History เป็นแบบ **append-only** ที่ระดับสิทธิ์ DB — แม้มีบั๊กในแอปก็แก้/ลบ log ไม่ได้
-- งาน purge (ถ้าทำ) ใช้ role แยกที่มีสิทธิ์ `DELETE`
+- retention job ใช้ role แยก `retention` (migration 000004): `SELECT, DELETE ON profile_change_logs` + `SELECT ON employees` — ลบ log เก่าได้ แต่แก้ log ไม่ได้ และแตะตารางอื่นไม่ได้ · LOGIN/รหัสผ่านตั้งนอก migration (db-init/02_retention_role.sql สำหรับ local dev)
+
+### 7.9 History retention (`history/service.Retention`)
+```
+ทุก RETENTION_INTERVAL (และตอน start) — role retention, 1 transaction:
+1. pg_try_advisory_xact_lock      → instance อื่นกำลังทำอยู่ = ข้าม (รันหลาย instance ได้)
+2. DELETE log ที่เก่ากว่า now − HISTORY_RETENTION_DAYS
+   ยกเว้น photo: ต่อพนักงาน เก็บ photo change 3 อันล่าสุดที่เก่ากว่า cutoff (KeepPhotosBeyondRetention)
+   RETURNING ชื่อไฟล์ของ photo change ที่ถูกลบ
+3. ไฟล์ที่ยังถูกใช้ = photo_path ปัจจุบัน หรือ new_value ของ photo change ที่เหลือ
+commit → ลบไฟล์ที่ไม่มีใครใช้ (best-effort, log ถ้าพลาด)
+```
+- เก็บรูป = รูปปัจจุบัน + ทุกรูปที่อัปโหลดในช่วง retention + อีก 3 รูปก่อนหน้านั้น · `old_value` ของ change ที่เก่าที่สุดที่เหลืออาจชี้ไฟล์ที่ลบแล้ว → UI แสดง placeholder
+- API ยัง serve ได้แม้ retention DB เชื่อมไม่ได้ (log error) — เป็นงาน housekeeping
+- ทดสอบ: unit test ของ service (fake repo) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role)
 
 ---
 
@@ -698,7 +714,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 |---|---|
 | Dashboard | การ์ดตัวเลข 3–4 ใบ: จำนวนพนักงาน, % โปรไฟล์ครบ, top 5 skills, การแก้ไขล่าสุด |
 | Skills | รายการ: ปุ่ม ↑↓ ทุกขนาดจอ (แทน drag — ใช้ keyboard/screen reader ได้, ส่งลำดับใหม่ทั้งชุดใน request เดียว), Name (แก้ inline ✓/✕), Used by, สวิตช์ Active, ค้นหา, ปุ่ม Add skill · หมายเหตุ "Inactive skills disappear from the picker, but employees who already have them keep them." |
-| Settings | Change history: input จำนวนวัน + ปุ่มลัด 7/14/30/90, hint "1–365 days. Older records are kept, just hidden.", แสดงผู้แก้ล่าสุด, Save มีผลทันที |
+| Settings | Change history: input จำนวนวัน + ปุ่มลัด 7/14/30/90, hint "1–N days. Changes are kept for N days, then deleted." (N = `maxHistoryDays`), ปุ่มลัดที่เกิน N ถูกซ่อน, แสดงผู้แก้ล่าสุด, Save มีผลทันที |
 | Employees | ตารางค้นหาชื่อ/รหัส + pagination (มือถือเป็นการ์ด) |
 | Employee detail | ข้อมูลโปรไฟล์, ช่อง Legal name (badge "Admin only") + Save name, history ทั้งหมดของคนนั้น (ระบุผู้แก้) |
 
@@ -771,11 +787,11 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 - skills ชุดเดิมแต่สลับลำดับ → version +1 แต่ไม่มี log · insert log ล้มเหลว → skills ถูก rollback
 - history: log อายุ 8 วันไม่แสดงเมื่อ `history_days=7` แต่แสดงเมื่อ `=10` และ `hasOlder` ถูกต้อง
 - history: ไม่เคยแก้ → `items: []`, `hasOlder: false` · แก้นานแล้ว → `items: []`, `hasOlder: true` · เห็นเฉพาะของตัวเอง
-- history: `app_settings` ไม่มีค่าหรือค่าเสีย → ใช้ env `HISTORY_DAYS` (หน้าไม่พัง) · `?field=` ที่ไม่รู้จัก / `page` ไม่ใช่ตัวเลข / `pageSize` > 100 → 400
+- history: `app_settings` ไม่มีค่าหรือค่าเสีย → ใช้ 7 วัน (หน้าไม่พัง) · ค่าเกิน retention → ตัดเหลือ retention · `?field=` ที่ไม่รู้จัก / `page` ไม่ใช่ตัวเลข / `pageSize` > 100 → 400
 - employee เรียก `/admin/*` → 403 · เรียก `AdminService` ด้วย actor ที่ไม่ใช่ admin → `ErrForbidden`
 - admin แก้ชื่อ → log `first_name`/`last_name` ระบุ `changed_by` = admin
 - ปิด skill → ไม่อยู่ใน `/skills` แต่พนักงานที่มีอยู่แล้วยังเห็น · ชื่อ skill ซ้ำ (ไม่สนตัวพิมพ์) → 409
-- admin ตั้ง `history_days = 30` → `/profile/history` คืน `days: 30` ทันที (ไม่ restart) · ค่า 0 หรือ 400 → 400
+- admin ตั้ง `history_days = 30` → `/profile/history` คืน `days: 30` ทันที (ไม่ restart) · ค่า 0 หรือเกิน retention → 400
 - บัญชี `is_active = FALSE` login ไม่ได้
 - role `app` สั่ง `UPDATE`/`DELETE` บน `profile_change_logs` → permission denied
 - E2E responsive: แก้ contact ผ่าน Drawer บนมือถือ, ไม่มี horizontal scroll ทุก breakpoint
@@ -825,13 +841,13 @@ volumes: { pg-data: {}, uploads: {} }
 | Clean Architecture แบบ Package by Feature (1 feature = โฟลเดอร์เดียว, 1 layer = 1 package: `domain` `model` `repo` `service` `api`) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, คอมไพเลอร์บังคับทิศ dependency ระหว่าง layer, กฎธุรกิจอยู่ใน `domain` ทดสอบได้โดยไม่มี DB, route ทั้งหมดอ่านได้ที่ `server/routes.go` ที่เดียว | ชื่อ package ซ้ำกันข้าม feature (`domain`, `service`) → ต้อง alias ตอน import หลาย feature · `domain` ของ feature อ้างกันได้ (profile → skill, history) · feature ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
 | Transaction + `FOR UPDATE` + `version` | กันแก้ทับกัน, แยก 404/409 ชัด, log ไม่หลุดจาก update | lock แถวสั้น ๆ ระหว่าง transaction (ไม่มีผลที่ scale นี้) |
 | History เขียนใน service (ไม่ใช้ DB trigger) | diff ที่อ่านง่าย (skills เป็นชื่อ), รู้ว่าใครแก้จาก context, test ใน Go ได้ | ถ้ามีคนแก้ DB ตรง ๆ จะไม่มี log → ชดเชยด้วยสิทธิ์ DB role `app` (trigger เป็นทางเลือกในอนาคต) |
-| History append-only ด้วยสิทธิ์ DB | audit เชื่อถือได้ แม้แอปมีบั๊ก | purge ต้องใช้ role แยก |
+| History append-only ด้วยสิทธิ์ DB | audit เชื่อถือได้ แม้แอปมีบั๊ก | retention job ต้องใช้ role แยก (`retention`) และ connection แยก |
 | JSONB สำหรับ `old_value`/`new_value` | ค่าเดี่ยวและ array (skills) อยู่ column เดียว, FE ได้ type ตรง | query ข้างในค่ายากกว่า TEXT เล็กน้อย (ไม่จำเป็นต้องทำ) |
 | Validation 2 ชั้น (Go + CHECK constraint) | Go ให้ error ที่ผู้ใช้อ่านเข้าใจ, DB กันข้อมูลเสียจากทุกช่องทาง | กฎซ้ำ 2 ที่ |
 | Contact ใช้ endpoint เดียว `PUT /profile/contact/:field` + map กฎต่อ field (table-driven) | 1 handler/service, เพิ่ม field ใหม่ง่าย, ยัง 1 request = 1 field = 1 log ตรงโจทย์ | ไม่ใช้ PATCH แบบ partial body (เลี่ยงความกำกวม "ไม่ส่ง" vs "ส่งค่าว่าง") |
 | Log อยู่ใน PostgreSQL เดียวกัน (ไม่แยก Mongo) | atomic กับการ update, ไม่มีปัญหา dual write, ปริมาณข้อมูลน้อย | ถ้าโตมาก → Outbox pattern ส่งต่อ Mongo/Elasticsearch โดยเปลี่ยนแค่ history repository |
-| "7 วัน" เป็นช่วงแสดง ไม่ใช่ TTL | เปลี่ยน config แล้วข้อมูลเก่ายังอยู่ | ข้อมูลโตต่อเนื่อง → purge job แยก (optional) |
-| `history_days` อยู่ใน DB (`app_settings`) + env เป็น fallback | admin ปรับได้ทันทีโดยไม่ deploy | อ่านค่าทุก request (เล็กมาก, cache ได้ภายหลัง) |
+| "7 วัน" เป็นช่วงแสดง, retention 90 วันเป็น TTL | admin ขยายช่วงที่แสดงได้ทันทีภายใน retention, ข้อมูลไม่โตไม่สิ้นสุด | ข้อมูลเก่ากว่า retention หายถาวร (ยกเว้นรูป 3 รูปล่าสุด) |
+| `history_days` อยู่ใน DB (`app_settings`), ไม่มีค่า → 7, ไม่เกิน retention | admin ปรับได้ทันทีโดยไม่ deploy | อ่านค่าทุก request (เล็กมาก, cache ได้ภายหลัง) |
 | RBAC ตรวจทั้ง middleware และ service | defense in depth — ถ้าลืมใส่ middleware ที่ route ใหม่ service ยังกันอยู่ | ตรวจซ้ำ 2 ที่ |
 | Soft disable skill แทนการลบ | ข้อมูลเก่าของพนักงานไม่พัง, history ยังอ่านได้ | ตารางมี row ที่ไม่ใช้สะสม |
 | เก็บรูปบน local volume | ง่าย, demo ได้ทันที | scale หลายเครื่องไม่ได้ → `FileStorage` interface พร้อมเปลี่ยนเป็น S3/MinIO |
@@ -862,7 +878,6 @@ volumes: { pg-data: {}, uploads: {} }
 ### Nice-to-have (ถ้ามีเวลา)
 - Crop รูปก่อนอัปโหลด, dark mode, i18n TH/EN
 - History: ปุ่ม Revert, แจ้งเตือนเมื่ออีเมล/เบอร์ถูกเปลี่ยน, Export CSV (admin)
-- Scheduled purge history
 - Outbox → Mongo (เพื่อโชว์แนวคิด)
 
 ---

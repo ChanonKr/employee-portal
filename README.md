@@ -55,19 +55,26 @@ Admin only (`/api/v1/admin`, checked in the router and again in each use case):
 | GET | `/stats` | employees, complete profiles, top skills, recent changes |
 | GET | `/employees` | `?q=&page=&pageSize=` |
 | GET | `/employees/:id` | profile + role |
-| GET | `/employees/:id/history` | all time (`days: null`) |
+| GET | `/employees/:id/history` | everything kept (`days: null`) |
 | PUT | `/employees/:id/name` | `{firstName, lastName}`, `If-Match`; the only way to change a name |
 | POST | `/employees` | create account + profile; returns a one-time temporary password |
 | POST | `/employees/:id/reset-password` | new temporary password; user must change it at next sign-in |
 | GET / POST | `/skills` | list with usage / create |
 | PATCH | `/skills/:id` | `{name?, isActive?}`; skills are turned off, never deleted |
 | PUT | `/skills/order` | `[{id, sortOrder}]`, all or nothing |
-| GET | `/settings` | |
-| PUT | `/settings/history-days` | `{value}` 1–365, applies immediately |
+| GET | `/settings` | `historyDays` (window shown) and `maxHistoryDays` (retention) |
+| PUT | `/settings/history-days` | `{value}` from 1 to the retention, applies immediately |
 
 Every write takes `If-Match` with the version from the last read. A stale version returns
 `409 VERSION_CONFLICT`; the update and its history entry are committed in one transaction.
 Errors use one envelope: `{"error": {"code", "message", "fields", "requestId"}}`.
+
+**History retention.** Two numbers: employees *see* the last `historyDays` (admin setting,
+default 7), and the server *keeps* `HISTORY_RETENTION_DAYS` (env, default 90). A job in the
+API (`RETENTION_INTERVAL`, default daily) deletes older changes as the separate `retention`
+database role; the API role can only append to the log. Replaced photos are kept so the
+history can show them: beyond the retention, the 3 newest photos per employee are still
+kept, and a photo file is deleted only when no kept change or profile uses it.
 
 ## Tests
 
