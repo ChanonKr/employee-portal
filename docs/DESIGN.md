@@ -35,7 +35,7 @@
 - มี 2 role: `employee`, `admin` — บัญชีถูกสร้างโดย HR/Admin (ไม่มี sign-up)
 - "7 วัน" = ช่วงที่**แสดง** ไม่ใช่ช่วงที่**เก็บ** → เก็บ log ทั้งหมด, purge เป็น optional job
 - Change history อยู่ใน PostgreSQL ตัวเดียวกัน เพื่อให้ update + log อยู่ใน transaction เดียว (ไม่แยก Mongo — ดู §12)
-- **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน `repository.go`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
+- **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน package `repo`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
 
 ---
 
@@ -75,7 +75,7 @@
 
 ## 3. Repository Structure
 
-Backend ใช้ **Clean Architecture แบบ Package by Feature**: 1 module = 1 package แยก layer ด้วยไฟล์ (`handler.go` → `usecase.go` → `repository.go`) และใช้ `entity` กับ `pkg/` ร่วมกัน
+Backend ใช้ **Clean Architecture แบบ Package by Feature**: 1 feature = 1 โฟลเดอร์ แยก layer เป็น package ย่อย (`domain` · `model` · `repo` · `service` · `api`) และใช้ `shared` กับ `pkg/` ร่วมกัน
 
 ```
 employee-portal/
@@ -85,27 +85,27 @@ employee-portal/
 │   ├── modules/
 │   │   ├── server/
 │   │   │   ├── server.go               # gin.Engine, global middleware, Run/Shutdown
-│   │   │   └── routes.go               # composition root: สร้าง group + middleware, ประกอบ repo → usecase → handler แล้วเรียก RegisterRoutes ของแต่ละ module
-│   │   ├── entity/                     # domain ล้วน: ไม่มี tag, ไม่ import gin/pgx
-│   │   │   ├── employee.go             # Employee, Profile, ChangeContact()
-│   │   │   ├── contact.go              # ContactField: Parse / Normalize / Validate
-│   │   │   ├── changelog.go · skill.go · user.go · actor.go
-│   │   │   ├── errors.go               # ErrNotFound, ErrConflict, ErrForbidden, ErrUnauthorized, ValidationError
-│   │   │   └── *_test.go
-│   │   ├── auth/                       # router.go · handler.go · interface.go · usecase.go · repository.go · model.go · usecase_test.go
-│   │   ├── profile/                    # ไฟล์ชุดเดียวกัน (รวม PUT /profile/skills)
-│   │   ├── skill/                      # GET /skills (catalog สำหรับ picker)
-│   │   ├── history/                    # GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
-│   │   ├── file/                       # GET /files/photos/:name (handler อย่างเดียว — stream ไฟล์)
+│   │   │   ├── wire.go                 # composition root: ประกอบ repo → service → api ของทุก feature
+│   │   │   └── routes.go               # route table เดียวของทั้งระบบ: group + middleware + handler ทุก endpoint
+│   │   ├── shared/                     # domain kernel: Actor, Role, RequireAdmin, errors (ErrNotFound, ErrConflict, …, ValidationError), PageRequest
+│   │   ├── auth/                       # ทุก feature มีโครงเดียวกัน:
+│   │   │   ├── domain/                 #   กฎธุรกิจ + type (ไม่มี tag, ไม่ import gin/gorm) + *_test.go
+│   │   │   ├── model/                  #   GORM struct เฉพาะตาราง/คอลัมน์ที่ feature นี้ใช้
+│   │   │   ├── repo/                   #   query ด้วย GORM, แปลง model ↔ domain
+│   │   │   ├── service/                #   service.go (ลำดับขั้น + transaction) · interface.go (port: Repository …) · service_test.go
+│   │   │   └── api/                    #   api.go (Gin handler) · dto.go (request/response) · interface.go (Service ที่ api เรียก)
+│   │   ├── profile/                    # Employee, ContactField, ChangeContact/Skills/Photo/Name (รวม PUT /profile/skills)
+│   │   ├── skill/                      # catalog สำหรับ picker + Admin → Skills
+│   │   ├── history/                    # FieldName, Change, ChangeLog · GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
 │   │   ├── setting/                    # Admin → Settings (history days)
 │   │   ├── employee/                   # Admin → Employees (list, search, detail) + Dashboard stats
+│   │   └── file/api/                   # GET /files/photos/:name (api อย่างเดียว — stream ไฟล์)
 │   ├── pkg/
 │   │   ├── database/
 │   │   │   ├── postgres.go             # Open (*gorm.DB) + Ping + Close
 │   │   │   ├── tx.go                   # WithTx(ctx, db, fn(*gorm.DB))
-│   │   │   ├── errors.go               # gorm / pg error → entity error
+│   │   │   ├── errors.go               # gorm / pg error → shared error
 │   │   │   ├── migrations/             # golang-migrate: init, grants, seed_demo
-│   │   ├── router/                     # Groups: Root, API, Admin + middleware SignedIn/Ready ที่ server ส่งให้ทุก module
 │   │   ├── middleware/                 # requestid, logger, recover, auth, rbac, ratelimit, headers, timeout
 │   │   ├── httputil/                   # error envelope (WriteError), ETag / If-Match
 │   │   ├── security/                   # jwt.go, password.go (bcrypt)
@@ -209,12 +209,12 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 
 ### 5.1 แนวทาง
 - **Logic อยู่ใน Go service**: validation, diff สำหรับ history, ตรวจสิทธิ์, จัดการ transaction
-- **GORM อยู่แค่ใน `repository.go`** — use case และ entity ไม่ import GORM · struct ของ GORM (`pkg/database/model`) แยกจาก entity และแปลงด้วย `ToEntity()`
+- **GORM อยู่แค่ใน `repo` และ `model`** — service และ domain ไม่ import GORM · struct ของ GORM (`<feature>/model`) แยกจาก domain และแปลงด้วย `ToDomain()`
 - **Schema ไม่ให้ GORM สร้าง**: ตาราง, CHECK, grants (log append-only) และ seed อยู่ใน SQL migration · model ใส่ tag `default` ให้คอลัมน์ที่มีค่า default ใน DB เพื่อไม่ให้ GORM เขียน `false`/`0` ทับ
-- **ทุก use case ที่เขียนข้อมูล** = 1 transaction: lock แถว → update (เช็ก version) → insert log → commit
+- **ทุก service method ที่เขียนข้อมูล** = 1 transaction: lock แถว → update (เช็ก version) → insert log → commit
 - `SkipDefaultTransaction: true` — ไม่ให้ GORM เปิด transaction ซ้อนเอง ทุก transaction มาจาก `WithTx`
 
-### 5.2 Query หลัก (ใน repository)
+### 5.2 Query หลัก (ใน repo)
 | Repository method | GORM | ใช้ที่ |
 |---|---|---|
 | `GetUserByCode` / `GetUserByID` | `Model(&User{}).Joins("LEFT JOIN employees ...").Take` | Login, `/auth/me` |
@@ -231,8 +231,8 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 
 ### 5.3 ตัวอย่าง
 ```go
-// modules/profile/repository.go — optimistic lock: เขียนได้เฉพาะเมื่อ version ยังตรง
-func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map[string]any) (int32, error) {
+// modules/profile/repo/repo.go — optimistic lock: เขียนได้เฉพาะเมื่อ version ยังตรง
+func (t *txRepository) update(ctx context.Context, e domain.Employee, fields map[string]any) (int32, error) {
     fields["version"] = gorm.Expr("version + 1")
     fields["updated_at"] = gorm.Expr("now()")
     res := t.db.WithContext(ctx).Model(&model.Employee{}).
@@ -242,17 +242,17 @@ func (t *txRepository) update(ctx context.Context, e entity.Employee, fields map
         return 0, database.MapError(res.Error)
     }
     if res.RowsAffected == 0 {
-        return 0, entity.ErrConflict
+        return 0, shared.ErrConflict
     }
     return e.Version + 1, nil
 }
 
-func (t *txRepository) SaveContact(ctx context.Context, e entity.Employee, f entity.ContactField) (int32, error) {
+func (t *txRepository) SaveContact(ctx context.Context, e domain.Employee, f domain.ContactField) (int32, error) {
     col := contactColumn[f]                   // ชื่อ column จาก whitelist เท่านั้น
     return t.update(ctx, e, map[string]any{col: e.Contact(f)})
 }
 
-// modules/history/repository.go — เงื่อนไขต่อกันตามที่มี (days 0 = admin ไม่จำกัดช่วง)
+// modules/history/repo/repo.go — เงื่อนไขต่อกันตามที่มี (days 0 = admin ไม่จำกัดช่วง)
 db := r.db.WithContext(ctx).Model(&model.ProfileChangeLog{}).
     Joins("JOIN users ON users.id = profile_change_logs.changed_by").
     Where("profile_change_logs.employee_id = ?", q.EmployeeID)
@@ -268,26 +268,27 @@ db.Order("changed_at DESC").Order("id DESC").Limit(pageSize + 1).Offset(offset).
 - `hasNext` ได้จากการดึงเกินมา 1 แถว (ไม่ต้อง `COUNT(*)`) · index `(employee_id, changed_at DESC)` รองรับทั้ง filter และ sort
 
 ### 5.4 Transaction (ตัวอย่าง: แก้ contact)
-Use case ไม่รู้จัก GORM/pgx: เรียก `WithTx` ผ่าน interface `Repository` ที่ use case ประกาศเอง และกฎธุรกิจอยู่ใน `entity.Employee.ChangeContact`
+Service ไม่รู้จัก GORM/pgx: เรียก `WithTx` ผ่าน interface `Repository` ที่ service ประกาศเองใน `service/interface.go` และกฎธุรกิจอยู่ใน `domain.Employee.ChangeContact`
 ```go
-// modules/profile/usecase.go
+// modules/profile/service/interface.go
 type Repository interface {
-    GetProfile(ctx context.Context, employeeID int64) (entity.Profile, error)
+    GetProfile(ctx context.Context, employeeID int64) (domain.Profile, error)
     WithTx(ctx context.Context, fn func(tx TxRepository) error) error   // commit ถ้า nil, ไม่งั้น rollback
 }
 type TxRepository interface {
-    GetForUpdate(ctx context.Context, employeeID int64) (entity.Employee, error)
-    SaveContact(ctx context.Context, e entity.Employee, f entity.ContactField) (int32, error)
-    AppendChange(ctx context.Context, employeeID int64, c entity.Change, by entity.Actor) error
+    GetForUpdate(ctx context.Context, employeeID int64) (domain.Employee, error)
+    SaveContact(ctx context.Context, e domain.Employee, f domain.ContactField) (int32, error)
+    AppendChange(ctx context.Context, employeeID int64, c historydomain.Change, by shared.Actor) error
 }
 
-func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int32, error) {
-    field, err := entity.ParseContactField(in.Field)          // whitelist → 400 ถ้าไม่รู้จัก
+// modules/profile/service/service.go
+func (svc *Service) UpdateContact(ctx context.Context, in UpdateContactInput) (int32, error) {
+    field, err := domain.ParseContactField(in.Field)          // whitelist → 400 ถ้าไม่รู้จัก
     if err != nil {
         return 0, err
     }
     var newVersion int32
-    err = u.repo.WithTx(ctx, func(tx TxRepository) error {
+    err = svc.repo.WithTx(ctx, func(tx TxRepository) error {
         emp, err := tx.GetForUpdate(ctx, in.Actor.EmployeeID)  // SELECT ... FOR UPDATE
         if err != nil {
             return err                                          // ไม่มีแถว → ErrNotFound
@@ -307,9 +308,9 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
     return newVersion, err
 }
 ```
-- `repository.go` แปลง GORM model ↔ entity, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น entity error ผ่าน `database.MapError`
+- `repo` แปลง GORM model ↔ domain, map ชื่อ column จาก `contactColumn` (whitelist) และแปลง pg error เป็น shared error ผ่าน `database.MapError`
 - ตรวจ version หลัง `FOR UPDATE` → แยก 404 (ไม่มีแถว) กับ 409 (version ไม่ตรง) ได้ชัด
-- Unit test ของ use case ใช้ fake repository (in-memory) ส่วน transaction, lock และ rollback จริงทดสอบใน `tests/integration`
+- Unit test ของ service ใช้ fake repository (in-memory) ส่วน transaction, lock และ rollback จริงทดสอบใน `tests/integration`
 - `SetSkills`: ลำดับเดียวกัน แต่ใช้ `ReplaceSkills` + `BumpVersion` แทน `SaveContact` (รายละเอียด §8)
 
 ### 5.5 Error Mapping (GORM/pg → domain → HTTP)
@@ -353,7 +354,7 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 | GET | `/admin/settings` | – | `{historyDays, updatedBy: {id, employeeCode} \| null, updatedAt \| null}` |
 | PUT | `/admin/settings/history-days` | `{value}` (จำนวนเต็ม 1–365) | 204 · มีผลกับ `/profile/history` ทันที |
 
-module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · รายชื่อ/รายละเอียด/stats อยู่ใน `employee/` · history ของ admin อยู่ใน `history/` · แก้ชื่ออยู่ใน `profile/` (ใช้ lock + version + log เดียวกับการแก้โปรไฟล์) · ทุก admin use case เรียก `entity.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
+module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · รายชื่อ/รายละเอียด/stats อยู่ใน `employee/` · history ของ admin อยู่ใน `history/` · แก้ชื่ออยู่ใน `profile/` (ใช้ lock + version + log เดียวกับการแก้โปรไฟล์) · ทุก admin service method เรียก `shared.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
 | GET | `/admin/employees` | `?q=&page=&pageSize=` · `q` ค้นรหัสพนักงานหรือ "ชื่อ นามสกุล" (ไม่สนตัวพิมพ์, `%` `_` ที่พิมพ์มาเป็นตัวอักษรธรรมดา) | `{items: [{id, employeeCode, firstName, lastName, photoUrl, role, isActive}], page: {page, pageSize, hasNext}, total}` |
 | GET | `/admin/employees/:id` | – | `Profile` + `role`, `isActive`, skills มี `isActive` · `ETag` สำหรับแก้ชื่อ |
 | GET | `/admin/employees/:id/history` | `?field=&page=&pageSize=` | รูปเดียวกับ `/profile/history` แต่ `days: null` = ทั้งหมด (ไม่จำกัดช่วงเวลา) · 404 ถ้าไม่มีพนักงาน |
@@ -430,46 +431,45 @@ DB มี `CHECK` constraint เป็นชั้นที่สอง กั�
 Gin router
   → middleware : RequestID → Recover → Logger(slog) → SecureHeaders → CORS → Timeout → BodyLimit
                  (ต่อ route) RateLimit → Auth(JWT cookie) → RequireProfile / RequireRole
-  → handler.go    : bind JSON, อ่าน If-Match, เรียก Usecase, เขียน envelope ผ่าน httputil.WriteError
-  → usecase.go    : ลำดับขั้นของ use case + transaction — ไม่รู้จัก Gin / GORM / pgx
-  → entity        : กฎธุรกิจ (normalize, validate, version, diff สำหรับ history)
-  → repository.go : query ด้วย GORM, แปลง model ↔ entity, map error → entity error
+  → api        : bind JSON, อ่าน If-Match, เรียก Service, เขียน envelope ผ่าน httputil.WriteError
+  → service    : ลำดับขั้นของ use case + transaction — ไม่รู้จัก Gin / GORM / pgx
+  → domain     : กฎธุรกิจ (normalize, validate, version, diff สำหรับ history)
+  → repo       : query ด้วย GORM, แปลง model ↔ domain, map error → shared error
 ```
 
 **Dependency rule** (ลูกศร = import):
 ```
-handler.go ──▶ usecase.go ──▶ entity
-                   ▲
-repository.go ─────┘ (implements interface ที่ usecase.go ประกาศ) ──▶ pkg/database (GORM, model)
+api ──▶ service ──▶ domain ──▶ shared
+           ▲
+repo ──────┘ (implements service.Repository) ──▶ model, pkg/database (GORM)
 ```
-- `entity` ไม่ import อะไรในโปรเจกต์เลย
-- handler / usecase / repository อยู่ใน package เดียวกัน (ชื่อสั้น: `profile.NewUsecase`, ไม่ต้อง alias) คุม layer ด้วยการให้แต่ละชั้นรู้จักแค่ interface ของชั้นถัดไป
-- `modules/server/routes.go` เป็นที่เดียวที่ประกอบทุกชั้นเข้าด้วยกัน แล้วเรียก `RegisterRoutes(router.Groups)` ของแต่ละ module
+- `shared` ไม่ import อะไรในโปรเจกต์เลย · `domain` import ได้แค่ `shared` และ `domain` ของ feature อื่น (เช่น profile ใช้ `Skill` ของ skill และ `Change` ของ history)
+- `model` / `repo` / `service` / `api` ไม่ import ของ feature อื่น — คอมไพเลอร์บังคับ layer เพราะแต่ละชั้นเป็นคนละ package (api import repo ไม่ได้โดยไม่เห็นชัดใน import)
+- `modules/server/wire.go` เป็นที่เดียวที่ประกอบ repo → service → api และ `routes.go` เป็น route table เดียว (feature ไม่ register route เอง)
 
-**ไฟล์ในแต่ละ module (feature จบในโฟลเดอร์เดียว)**
-| ไฟล์ | หน้าที่ |
+**package ในแต่ละ feature**
+| package | หน้าที่ |
 |---|---|
-| `router.go` | ผูก route ของ module เข้ากับ group ที่ server ส่งมา (`API`, `Admin`, `SignedIn`, `Ready`) |
-| `handler.go` | HTTP ↔ use case: bind JSON, If-Match/ETag, DTO |
-| `interface.go` | port ของ module: `Usecase` (handler เรียก), `Repository` ฯลฯ (use case ต้องการ) |
-| `usecase.go` | ลำดับขั้น + transaction |
-| `repository.go` | query ด้วย GORM, แปลง model ↔ entity |
-| `model.go` | GORM struct **เฉพาะตาราง/คอลัมน์ที่ module นี้ใช้** (เช่น `auth` มี `employeeModel` แค่ 4 field สำหรับสร้างโปรไฟล์ว่าง) |
+| `domain` | type + กฎธุรกิจ ทดสอบได้โดยไม่มี DB |
+| `model` | GORM struct **เฉพาะตาราง/คอลัมน์ที่ feature นี้ใช้** (เช่น `auth/model.Employee` มีแค่ 4 field สำหรับสร้างโปรไฟล์ว่าง) + `ToDomain()` |
+| `repo` | `Repository` (GORM) implements `service.Repository` |
+| `service` | `Service` (ลำดับขั้น + transaction) · `interface.go` = port ที่ service ต้องการ (`Repository`, `TxRepository`, `PhotoProcessor`, …) · input type (`UpdateContactInput` …) |
+| `api` | `API` (Gin handler) · `dto.go` = JSON request/response · `interface.go` = `Service` ที่ api เรียก (fake ได้ใน test) |
 
-- module ไม่ import กันเอง: ตารางที่ใช้ร่วมกัน (`employees`, `skills`) แต่ละ module ประกาศ struct ของตัวเอง แลกกับ struct ซ้ำกันเล็กน้อย
-- struct เป็น unexported (`employeeModel`) → ถ้าจะฝังใน struct อื่นต้องเป็น field มีชื่อ + `gorm:"embedded"` (GORM ข้าม anonymous field ที่เป็น unexported type)
-- `entity` ยังอยู่รวมที่ `modules/entity` เพราะกฎธุรกิจใช้ข้าม module (เช่น `Employee` ใช้ทั้ง profile, employee, history)
+- ตารางที่ใช้ร่วมกัน (`employees`, `skills`) แต่ละ feature ประกาศ struct ใน `model` ของตัวเอง แลกกับ struct ซ้ำกันเล็กน้อย
+- ฝัง struct ของ `model` ใน row อื่นต้องเป็น field มีชื่อ + `gorm:"embedded"`
+- import ชื่อ package ซ้ำ (`domain`, `service`) → domain ของ feature ตัวเองใช้ชื่อ `domain` ตรง ๆ ของ feature อื่นใช้ alias `skilldomain`, `historydomain` · ใน `server` ใช้ `profileapi`, `profileservice`, `profilerepo`
 
 ### 7.2 Interfaces หลัก
-แต่ละ module ประกาศ interface ที่ use case **ต้องการ** ไว้ใน `usecase.go` ของตัวเอง (Dependency Inversion) — ดูตัวอย่าง `profile.Repository` / `profile.TxRepository` ใน §5.4
+แต่ละ feature ประกาศ interface ที่ service **ต้องการ** ไว้ใน `service/interface.go` และที่ api ต้องการไว้ใน `api/interface.go` (Dependency Inversion) — ดูตัวอย่าง `Repository` / `TxRepository` ของ profile ใน §5.4
 ```go
-// modules/auth/usecase.go
+// modules/auth/service/interface.go
 type Repository interface {
-    GetUserByCode(ctx context.Context, code string) (entity.User, error)
-    GetUserByID(ctx context.Context, id int64) (entity.User, error)
+    GetUserByCode(ctx context.Context, code string) (domain.User, error)
+    GetUserByID(ctx context.Context, id int64) (domain.User, error)
 }
 type TokenIssuer interface {
-    Issue(a entity.Actor) (token string, expiresAt time.Time, err error)
+    Issue(a shared.Actor) (token string, expiresAt time.Time, err error)
 }
 
 // pkg/storage (ขั้นถัดไป)
@@ -480,24 +480,24 @@ type FileStorage interface {
 }
 ```
 
-### 7.3 Contact: endpoint เดียว + กฎอยู่ใน entity
+### 7.3 Contact: endpoint เดียว + กฎอยู่ใน domain
 ```go
-// modules/entity/contact.go
+// modules/profile/domain/contact.go
 type ContactField string                        // "mobile" | "email" | "address"
 func ParseContactField(s string) (ContactField, error)
 func (f ContactField) Normalize(v string) string
 func (f ContactField) Validate(v string) error
-func (f ContactField) LogField() FieldName      // mobile → mobile_phone (ชื่อใน history)
+func (f ContactField) LogField() historydomain.FieldName      // mobile → mobile_phone (ชื่อใน history)
 
-// modules/profile/repository.go — ชื่อ column อยู่ใน adapter เท่านั้น
-var contactColumn = map[entity.ContactField]string{
-    entity.ContactMobile:  "mobile_phone",
-    entity.ContactEmail:   "contact_email",
-    entity.ContactAddress: "address",
+// modules/profile/repo/repo.go — ชื่อ column อยู่ใน adapter เท่านั้น
+var contactColumn = map[domain.ContactField]string{
+    domain.ContactMobile:  "mobile_phone",
+    domain.ContactEmail:   "contact_email",
+    domain.ContactAddress: "address",
 }
 ```
 - เพิ่ม field ใหม่ = เพิ่ม const + กฎใน `contact.go`, 1 แถวใน `contactColumn` (+ migration + CASE ใน query)
-- Unit test เป็น table-driven ใน `entity/contact_test.go`
+- Unit test เป็น table-driven ใน `profile/domain/employee_test.go`
 - ชื่อ column มาจาก map เท่านั้น — ไม่มีการประกอบ SQL จาก input ผู้ใช้
 
 ### 7.4 Transaction (GORM)
@@ -596,9 +596,9 @@ ValidateSkillIDs (≤ 20, ไม่ซ้ำ, > 0 — ตัดทิ้งก�
      → คืน Change (log ชื่อ ["Go","Flutter"] → ["Go","React"]) หรือ nil ถ้าชุดเดิม (ไม่สนลำดับ)
 → ReplaceSkills (delete + insert) → BumpVersion → AppendChange ถ้ามี Change
 ```
-- pattern เดียวกับ contact: use case = โหลด → `emp.ChangeXxx(...)` → บันทึก → log
+- pattern เดียวกับ contact: service = โหลด → `emp.ChangeXxx(...)` → บันทึก → log
 - `[]` = ล้างทุก skill (ได้) · ไม่ส่ง `skillIds` = 400
-- กฎทดสอบใน `entity/employee_test.go` แบบไม่ต้องมี DB
+- กฎทดสอบใน `profile/domain/employee_test.go` แบบไม่ต้องมี DB
 
 ---
 
@@ -821,8 +821,8 @@ volumes: { pg-data: {}, uploads: {} }
 |---|---|---|
 | PostgreSQL + logic ใน Go service (ไม่ใช้ Stored Procedure) | ตรงทิศทางทีม (ย้ายจาก MySQL SP), test/debug ใน Go ง่าย, logic อยู่ที่เดียวกับโค้ด, ไม่ผูกกับ DB | ต้องจัดการ transaction เองใน service → `TxManager` + integration test |
 | Gin (ไม่ใช่ Fiber) | อยู่บน `net/http` มาตรฐาน: ใช้ `httptest` และ middleware ของ ecosystem ได้, ส่ง `context.Context` ลง pgx ตรง ๆ, ไม่มี pitfall เรื่อง buffer reuse ของ fasthttp | benchmark ช้ากว่า Fiber — ไม่มีผลเพราะคอขวดอยู่ที่ DB และการ resize รูป |
-| GORM (ORM) แทน sqlc | เขียน query ใน Go ได้เลยไม่ต้อง generate, dynamic filter (history, ค้นหาพนักงาน) ต่อ `Where` ได้ตรง ๆ, upsert/locking มี clause ให้, ทีมส่วนใหญ่คุ้นเคย | พฤติกรรมแฝงต้องระวัง: `Updates(struct)` ข้าม zero value (→ ใช้ map), insert เขียน `false`/`0` ทับ DB default (→ tag `default`), query ผิดเจอตอนรันไม่ใช่ตอน build (→ integration test ครอบทุก repository) · ไม่ใช้ AutoMigrate · GORM อยู่แค่ใน `repository.go` (เดิมใช้ sqlc แล้วเปลี่ยนได้โดยไม่แตะ use case/entity/test ของ use case) |
-| Clean Architecture แบบ Package by Feature (1 module = 1 package) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, ชื่อสั้นไม่ stutter (`profile.NewUsecase`), กฎธุรกิจอยู่ใน `entity` ทดสอบได้โดยไม่มี DB | คอมไพเลอร์ไม่บังคับ layer ภายใน module → คุมด้วย interface · module ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
+| GORM (ORM) แทน sqlc | เขียน query ใน Go ได้เลยไม่ต้อง generate, dynamic filter (history, ค้นหาพนักงาน) ต่อ `Where` ได้ตรง ๆ, upsert/locking มี clause ให้, ทีมส่วนใหญ่คุ้นเคย | พฤติกรรมแฝงต้องระวัง: `Updates(struct)` ข้าม zero value (→ ใช้ map), insert เขียน `false`/`0` ทับ DB default (→ tag `default`), query ผิดเจอตอนรันไม่ใช่ตอน build (→ integration test ครอบทุก repository) · ไม่ใช้ AutoMigrate · GORM อยู่แค่ใน `repo`/`model` (เดิมใช้ sqlc แล้วเปลี่ยนได้โดยไม่แตะ service/domain/test ของ service) |
+| Clean Architecture แบบ Package by Feature (1 feature = โฟลเดอร์เดียว, 1 layer = 1 package: `domain` `model` `repo` `service` `api`) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, คอมไพเลอร์บังคับทิศ dependency ระหว่าง layer, กฎธุรกิจอยู่ใน `domain` ทดสอบได้โดยไม่มี DB, route ทั้งหมดอ่านได้ที่ `server/routes.go` ที่เดียว | ชื่อ package ซ้ำกันข้าม feature (`domain`, `service`) → ต้อง alias ตอน import หลาย feature · `domain` ของ feature อ้างกันได้ (profile → skill, history) · feature ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
 | Transaction + `FOR UPDATE` + `version` | กันแก้ทับกัน, แยก 404/409 ชัด, log ไม่หลุดจาก update | lock แถวสั้น ๆ ระหว่าง transaction (ไม่มีผลที่ scale นี้) |
 | History เขียนใน service (ไม่ใช้ DB trigger) | diff ที่อ่านง่าย (skills เป็นชื่อ), รู้ว่าใครแก้จาก context, test ใน Go ได้ | ถ้ามีคนแก้ DB ตรง ๆ จะไม่มี log → ชดเชยด้วยสิทธิ์ DB role `app` (trigger เป็นทางเลือกในอนาคต) |
 | History append-only ด้วยสิทธิ์ DB | audit เชื่อถือได้ แม้แอปมีบั๊ก | purge ต้องใช้ role แยก |

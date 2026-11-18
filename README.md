@@ -103,19 +103,27 @@ editing and popovers. Every edit sends `If-Match`; a 409 reloads the profile and
 
 ## Backend layout
 
-Clean Architecture, one package per feature:
+Clean Architecture, packaged by feature. Each feature splits into one package per layer:
 
 ```
 backend/
 ├── app/main.go               entry point
 ├── modules/
-│   ├── entity/               domain types and business rules (no framework imports)
-│   ├── auth/ profile/ skill/ history/ file/ setting/ employee/
-│   │     router.go → handler.go → usecase.go → repository.go
-│   │     interface.go (ports) · model.go (GORM structs for this module's tables)
-│   └── server/               shared route groups + middleware; wires each module
-└── pkg/                      database (GORM, migrations), router, middleware, security, storage, imaging
+│   ├── shared/               Actor, Role, domain errors, paging (imports nothing from the project)
+│   ├── auth/ profile/ skill/ history/ setting/ employee/
+│   │   ├── domain/           business rules and types (no framework imports)
+│   │   ├── model/            GORM structs for this feature's tables
+│   │   ├── repo/             GORM queries; model ↔ domain
+│   │   ├── service/          use cases + transactions; interface.go = ports it needs (Repository …)
+│   │   └── api/              Gin handlers + DTOs; interface.go = the Service it calls
+│   ├── file/api/             streams stored photos (no other layers)
+│   └── server/               wire.go builds repo → service → api; routes.go is the one route table
+└── pkg/                      database (GORM, migrations), middleware, httputil, security, storage, imaging
 ```
+
+Dependencies point inward: `api → service → domain`, `repo → service (ports), model, domain`.
+A feature's `domain` may import another feature's `domain` (profile uses skill and history),
+but `model`, `repo`, `service` and `api` never import another feature's.
 
 ## License
 
