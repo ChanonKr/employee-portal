@@ -45,5 +45,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	// The retention job is housekeeping: if it cannot connect, the API still serves.
+	if cfg.RetentionDatabaseURL == "" {
+		log.Warn("retention: RETENTION_DATABASE_URL is not set, old history is never deleted")
+	} else if retentionDB, err := database.Open(ctx, cfg.RetentionDatabaseURL); err != nil {
+		log.Error("retention: cannot connect, old history is not deleted", "error", err)
+	} else {
+		defer database.Close(retentionDB)
+		go srv.RunRetention(ctx, retentionDB)
+	}
+
 	return srv.Run(ctx)
 }

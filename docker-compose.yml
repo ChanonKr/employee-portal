@@ -29,6 +29,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/portal?sslmode=disable
+      # Deletes history older than HISTORY_RETENTION_DAYS (role created by db-init).
+      RETENTION_DATABASE_URL: postgres://retention:retention@postgres:5432/portal?sslmode=disable
       # Trust X-Forwarded-For from the web (nginx) container on the compose network,
       # so rate limits see the real client IP.
       TRUSTED_PROXIES: 172.16.0.0/12

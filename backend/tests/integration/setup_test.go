@@ -31,9 +31,10 @@ import (
 )
 
 var (
-	ownerPool *pgxpool.Pool // schema owner: raw SQL to arrange and inspect test data
-	appPool   *pgxpool.Pool // role "app", raw SQL: checks what the role may not do
-	appDB     *gorm.DB      // role "app" through GORM: what the API uses in production
+	ownerPool   *pgxpool.Pool // schema owner: raw SQL to arrange and inspect test data
+	appPool     *pgxpool.Pool // role "app", raw SQL: checks what the role may not do
+	appDB       *gorm.DB      // role "app" through GORM: what the API uses in production
+	retentionDB *gorm.DB      // role "retention": what the retention job uses
 )
 
 func TestMain(m *testing.M) {
@@ -96,6 +97,17 @@ func run(m *testing.M) int {
 		return 1
 	}
 	defer database.Close(appDB)
+
+	if _, err := ownerPool.Exec(ctx, `ALTER ROLE retention LOGIN PASSWORD 'retention'`); err != nil {
+		log.Printf("enable retention login: %v", err)
+		return 1
+	}
+	retentionURL := fmt.Sprintf("postgres://retention:retention@%s:%s/portal?sslmode=disable", host, port.Port())
+	if retentionDB, err = database.Open(ctx, retentionURL); err != nil {
+		log.Printf("retention gorm: %v", err)
+		return 1
+	}
+	defer database.Close(retentionDB)
 
 	return m.Run()
 }

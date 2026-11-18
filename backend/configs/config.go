@@ -15,12 +15,16 @@ type Config struct {
 	JWTTTL      time.Duration `env:"JWT_TTL" envDefault:"8h"`
 	// How many days of change history to keep; the retention job deletes older
 	// changes. The window employees see is an admin setting (app_settings).
-	HistoryRetentionDays int      `env:"HISTORY_RETENTION_DAYS" envDefault:"90"`
-	UploadDir            string   `env:"UPLOAD_DIR" envDefault:"/data/uploads"`
-	UploadMaxBytes       int64    `env:"UPLOAD_MAX_BYTES" envDefault:"5242880"`
-	CORSOrigins          []string `env:"CORS_ORIGINS" envDefault:"http://localhost:5173" envSeparator:","`
-	TrustedProxies       []string `env:"TRUSTED_PROXIES" envSeparator:","` // e.g. the web container, so ClientIP() is the real client
-	LogLevel             string   `env:"LOG_LEVEL" envDefault:"info"`
+	HistoryRetentionDays int `env:"HISTORY_RETENTION_DAYS" envDefault:"90"`
+	// The retention job connects as the "retention" role (it may delete history;
+	// the API role may not). Empty disables the job.
+	RetentionDatabaseURL string        `env:"RETENTION_DATABASE_URL"`
+	RetentionInterval    time.Duration `env:"RETENTION_INTERVAL" envDefault:"24h"`
+	UploadDir            string        `env:"UPLOAD_DIR" envDefault:"/data/uploads"`
+	UploadMaxBytes       int64         `env:"UPLOAD_MAX_BYTES" envDefault:"5242880"`
+	CORSOrigins          []string      `env:"CORS_ORIGINS" envDefault:"http://localhost:5173" envSeparator:","`
+	TrustedProxies       []string      `env:"TRUSTED_PROXIES" envSeparator:","` // e.g. the web container, so ClientIP() is the real client
+	LogLevel             string        `env:"LOG_LEVEL" envDefault:"info"`
 	// Sign-in attempts per minute per IP. Raise only for automated test runs.
 	LoginRateLimit int `env:"LOGIN_RATE_LIMIT" envDefault:"5"`
 }
@@ -35,6 +39,9 @@ func Load() (Config, error) {
 	}
 	if cfg.HistoryRetentionDays < 1 || cfg.HistoryRetentionDays > 3650 {
 		return Config{}, errors.New("HISTORY_RETENTION_DAYS must be between 1 and 3650")
+	}
+	if cfg.RetentionInterval < time.Minute {
+		return Config{}, errors.New("RETENTION_INTERVAL must be at least 1m")
 	}
 	if cfg.LoginRateLimit < 1 {
 		return Config{}, errors.New("LOGIN_RATE_LIMIT must be at least 1")
