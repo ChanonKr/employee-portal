@@ -208,6 +208,20 @@ func TestHTTP_LoginViewAndEditProfile(t *testing.T) {
 
 	res = do("GET", photo.PhotoURL, "", nil, nil)
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "photos need a session")
+
+	// The photo history carries URLs (the stored values are file names).
+	res = do("GET", "/api/v1/profile/history?field=photo", "", nil, cookies)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var photoHist struct {
+		Items []struct {
+			OldValue *string `json:"oldValue"`
+			NewValue string  `json:"newValue"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&photoHist))
+	require.Len(t, photoHist.Items, 1)
+	assert.Nil(t, photoHist.Items[0].OldValue, "first photo")
+	assert.Equal(t, photo.PhotoURL, photoHist.Items[0].NewValue)
 	res = do("GET", "/api/v1/files/photos/..%2F..%2Fetc%2Fpasswd", "", nil, cookies)
 	assert.Equal(t, http.StatusNotFound, res.StatusCode)
 

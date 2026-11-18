@@ -145,7 +145,8 @@ func (svc *Service) SetSkills(ctx context.Context, in SetSkillsInput) (int32, er
 //  2. save the new file
 //  3. tx: lock → check version → set photo_path → log
 //     failure → delete the new file, so no orphan is left
-//     success → delete the old file (best effort: an orphan file is harmless)
+//     success → keep the replaced file: the change history shows it until the
+//     retention job deletes it (see history/service.Retention)
 func (svc *Service) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32, string, error) {
 	jpeg, err := svc.photos.Normalize(in.File)
 	if err != nil {
@@ -156,16 +157,12 @@ func (svc *Service) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32
 		return 0, "", err
 	}
 
-	var (
-		newVersion int32
-		oldName    *string
-	)
+	var newVersion int32
 	err = svc.repo.WithTx(ctx, func(tx TxRepository) error {
 		emp, err := tx.GetForUpdate(ctx, in.Actor.EmployeeID)
 		if err != nil {
 			return err
 		}
-		oldName = emp.PhotoPath
 		change, err := emp.ChangePhoto(name, in.Version)
 		if err != nil {
 			return err
@@ -178,9 +175,6 @@ func (svc *Service) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32
 	if err != nil {
 		svc.deleteFile(ctx, name, "rollback new photo")
 		return 0, "", err
-	}
-	if oldName != nil {
-		svc.deleteFile(ctx, *oldName, "remove replaced photo")
 	}
 	return newVersion, name, nil
 }

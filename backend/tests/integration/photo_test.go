@@ -57,7 +57,7 @@ func TestUpdatePhoto_ReplacesFileAndLogs(t *testing.T) {
 
 	_, second, err := uc.UpdatePhoto(ctx, profileservice.UpdatePhotoInput{Actor: actor, File: bytes.NewReader(testPNG(t, 64, 64)), Version: 2})
 	require.NoError(t, err)
-	assert.Equal(t, []string{second}, filesIn(t, dir), "old file removed after commit")
+	assert.ElementsMatch(t, []string{first, second}, filesIn(t, dir), "the replaced file stays for the history")
 
 	var path string
 	require.NoError(t, ownerPool.QueryRow(ctx, `SELECT photo_path FROM employees WHERE id = $1`, empID).Scan(&path))

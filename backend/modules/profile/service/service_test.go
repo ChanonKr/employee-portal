@@ -321,14 +321,14 @@ func TestUpdatePhoto(t *testing.T) {
 		return svc.UpdatePhoto(ctx, UpdatePhotoInput{Actor: actor, File: strings.NewReader(body), Version: version})
 	}
 
-	t.Run("saves new file, logs, deletes the replaced file", func(t *testing.T) {
+	t.Run("saves new file, logs, keeps the replaced file for the history", func(t *testing.T) {
 		repo, files, svc := setup(ptr("old.jpg"))
 		v, name, err := upload(svc, "png", 3)
 		require.NoError(t, err)
 		assert.EqualValues(t, 4, v)
 		assert.Equal(t, "new-1.jpg", name)
 		assert.Equal(t, "new-1.jpg", *repo.emp.PhotoPath)
-		assert.Equal(t, map[string]bool{"new-1.jpg": true}, files.files)
+		assert.Equal(t, map[string]bool{"old.jpg": true, "new-1.jpg": true}, files.files)
 		require.Len(t, repo.logs, 1)
 		assert.Equal(t, historydomain.Change{Field: historydomain.FieldPhoto, Old: "old.jpg", New: "new-1.jpg"}, repo.logs[0])
 	})

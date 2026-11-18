@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"employee-portal/modules/history/domain"
 	"employee-portal/modules/history/service"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
@@ -74,11 +75,15 @@ func (h *API) AdminList(c *gin.Context) {
 func toListResponse(r service.Result) listResponse {
 	items := make([]itemDTO, len(r.Items))
 	for i, l := range r.Items {
+		oldV, newV := l.Old, l.New
+		if l.Field == domain.FieldPhoto { // stored as file names; the client needs URLs
+			oldV, newV = photoURL(oldV), photoURL(newV)
+		}
 		items[i] = itemDTO{
 			ID:        l.ID,
 			Field:     string(l.Field),
-			OldValue:  l.Old,
-			NewValue:  l.New,
+			OldValue:  oldV,
+			NewValue:  newV,
 			ChangedAt: l.ChangedAt.UTC(),
 			ChangedBy: changedByDTO{ID: l.ChangedBy.UserID, Role: l.ChangedBy.Role},
 		}
@@ -93,4 +98,13 @@ func toListResponse(r service.Result) listResponse {
 		Items:    items,
 		Page:     pageDTO{Page: r.Page.Page, PageSize: r.Page.PageSize, HasNext: r.HasNext},
 	}
+}
+
+// photoURL maps a stored photo file name to its URL; nil stays nil.
+// The file may already be deleted by the retention job (the URL then returns 404).
+func photoURL(v any) any {
+	if name, ok := v.(string); ok {
+		return httputil.PhotoURL(name)
+	}
+	return nil
 }

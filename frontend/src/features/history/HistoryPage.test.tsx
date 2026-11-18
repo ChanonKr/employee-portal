@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { HistoryItem } from '@/api/types'
 import { mockFetch, renderRoute } from '@/test/render'
@@ -46,6 +46,23 @@ describe('HistoryPage', () => {
     expect(await screen.findByText('React')).toBeInTheDocument()
     await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).includes('field=skills'))).toBe(true))
     expect(screen.getByRole('button', { name: 'Skills' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('shows photo changes as thumbnails and a placeholder for a deleted file', async () => {
+    const today = new Date().toISOString()
+    mockFetch((url) =>
+      url.includes('/auth/me')
+        ? { status: 200, body: { userId: 2, role: 'employee' } }
+        : { status: 200, body: { days: 30, hasOlder: false, page: { page: 1, pageSize: 20, hasNext: false },
+            items: [item(5, 'photo', today, { oldValue: '/api/v1/files/photos/old.jpg', newValue: '/api/v1/files/photos/new.jpg' })] } },
+    )
+    renderRoute(<HistoryPage />)
+    const before = await screen.findByAltText('Previous photo')
+    expect(before).toHaveAttribute('src', '/api/v1/files/photos/old.jpg')
+    expect(screen.getByAltText('New photo')).toHaveAttribute('src', '/api/v1/files/photos/new.jpg')
+
+    fireEvent.error(before) // the retention job deleted the old file
+    expect(await screen.findByText('Previous photo is no longer kept')).toBeInTheDocument()
   })
 
   it('empty state uses the API window', async () => {

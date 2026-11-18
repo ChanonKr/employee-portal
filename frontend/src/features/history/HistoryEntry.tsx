@@ -1,6 +1,7 @@
 import { ArrowRight, Camera, Mail, MapPin, Phone, ShieldCheck, Sparkles, UserRound, type LucideIcon } from 'lucide-react'
 import type { HistoryField, HistoryItem } from '@/api/types'
 import { displayValue, fieldLabels, skillDiff } from './describe'
+import { PhotoChange } from './PhotoChange'
 
 const icons: Record<HistoryField, LucideIcon> = {
   first_name: UserRound,
@@ -62,7 +63,8 @@ function ChangeDetail({ item }: { item: HistoryItem }) {
     )
   }
   if (item.field === 'photo') {
-    return <p className="mt-0.5 text-sm text-muted">{item.oldValue ? 'Photo changed' : 'Photo added'}</p>
+    // The API sends photo URLs for this field.
+    return <PhotoChange oldUrl={asUrl(item.oldValue)} newUrl={asUrl(item.newValue)} />
   }
   const before = displayValue(item.field, item.oldValue)
   const after = displayValue(item.field, item.newValue)
@@ -80,3 +82,5 @@ function ChangeDetail({ item }: { item: HistoryItem }) {
     </p>
   )
 }
+
+const asUrl = (v: HistoryItem['oldValue']) => (typeof v === 'string' ? v : null)
