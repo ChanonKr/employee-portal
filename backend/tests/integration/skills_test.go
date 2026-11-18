@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/profile"
+	profileservice "employee-portal/modules/profile/service"
 	"employee-portal/modules/shared"
 	skillrepo "employee-portal/modules/skill/repo"
 	skillservice "employee-portal/modules/skill/service"
@@ -48,10 +48,10 @@ func TestSetSkills_ReplacesSetAndLogsNames(t *testing.T) {
 	userID, empID, _ := newEmployee(t, "0811111111")
 	a, aName := newSkill(t, true)
 	b, bName := newSkill(t, true)
-	uc := newProfileUsecase(t)
+	uc := newProfileService(t)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
-	v, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{a, b}, Version: 1})
+	v, err := uc.SetSkills(ctx, profileservice.SetSkillsInput{Actor: actor, SkillIDs: []int64{a, b}, Version: 1})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, v)
 	assert.ElementsMatch(t, []int64{a, b}, employeeSkillIDs(t, empID))
@@ -64,13 +64,13 @@ func TestSetSkills_ReplacesSetAndLogsNames(t *testing.T) {
 	assert.JSONEq(t, fmt.Sprintf(`[%q, %q]`, aName, bName), newV)
 
 	// Same set in another order: version moves, no new log.
-	v, err = uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{b, a}, Version: 2})
+	v, err = uc.SetSkills(ctx, profileservice.SetSkillsInput{Actor: actor, SkillIDs: []int64{b, a}, Version: 2})
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, v)
 	assert.Equal(t, 1, countLogs(t, empID))
 
 	// Clear all.
-	_, err = uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{}, Version: 3})
+	_, err = uc.SetSkills(ctx, profileservice.SetSkillsInput{Actor: actor, SkillIDs: []int64{}, Version: 3})
 	require.NoError(t, err)
 	assert.Empty(t, employeeSkillIDs(t, empID))
 }
@@ -80,18 +80,18 @@ func TestSetSkills_InactiveSkill(t *testing.T) {
 	userID, empID, _ := newEmployee(t, "0811111111")
 	active, _ := newSkill(t, true)
 	retired, _ := newSkill(t, false)
-	uc := newProfileUsecase(t)
+	uc := newProfileService(t)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	// Cannot newly pick a retired skill.
-	_, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{active, retired}, Version: 1})
+	_, err := uc.SetSkills(ctx, profileservice.SetSkillsInput{Actor: actor, SkillIDs: []int64{active, retired}, Version: 1})
 	assert.ErrorIs(t, err, shared.ErrValidation)
 	assert.Empty(t, employeeSkillIDs(t, empID))
 
 	// An employee who already has it (picked before it was retired) keeps it.
 	_, err = ownerPool.Exec(ctx, `INSERT INTO employee_skills (employee_id, skill_id) VALUES ($1, $2)`, empID, retired)
 	require.NoError(t, err)
-	_, err = uc.SetSkills(ctx, profile.SetSkillsInput{Actor: actor, SkillIDs: []int64{active, retired}, Version: 1})
+	_, err = uc.SetSkills(ctx, profileservice.SetSkillsInput{Actor: actor, SkillIDs: []int64{active, retired}, Version: 1})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []int64{active, retired}, employeeSkillIDs(t, empID))
 
@@ -107,10 +107,10 @@ func TestSetSkills_LogFailureRollsBackSkills(t *testing.T) {
 	ctx := context.Background()
 	_, empID, _ := newEmployee(t, "0811111111")
 	a, _ := newSkill(t, true)
-	uc := newProfileUsecase(t)
+	uc := newProfileService(t)
 
 	ghost := shared.Actor{UserID: 999_999_999, EmployeeID: empID} // log insert fails (FK)
-	_, err := uc.SetSkills(ctx, profile.SetSkillsInput{Actor: ghost, SkillIDs: []int64{a}, Version: 1})
+	_, err := uc.SetSkills(ctx, profileservice.SetSkillsInput{Actor: ghost, SkillIDs: []int64{a}, Version: 1})
 	require.Error(t, err)
 
 	assert.Empty(t, employeeSkillIDs(t, empID), "skills must roll back with the failed log")

@@ -1,4 +1,4 @@
-package profile
+package api
 
 import (
 	"errors"
@@ -6,57 +6,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/profile/domain"
+	"employee-portal/modules/profile/service"
 	"employee-portal/modules/shared"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
 
-type Handler struct {
-	uc Usecase
+// API is the HTTP adapter for this feature. Routes are registered in modules/server.
+type API struct {
+	svc Service
 }
 
-func NewHandler(uc Usecase) *Handler {
-	return &Handler{uc: uc}
-}
-
-type contactDTO struct {
-	MobilePhone *string `json:"mobilePhone"`
-	Email       *string `json:"email"`
-	Address     *string `json:"address"`
-}
-
-type skillDTO struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-}
-
-type profileResponse struct {
-	ID           int64      `json:"id"`
-	EmployeeCode string     `json:"employeeCode"`
-	FirstName    string     `json:"firstName"`
-	LastName     string     `json:"lastName"`
-	PhotoURL     *string    `json:"photoUrl"`
-	Contact      contactDTO `json:"contact"`
-	Skills       []skillDTO `json:"skills"`
-	Version      int32      `json:"version"`
-}
-
-type updateContactRequest struct {
-	Value *string `json:"value" binding:"required"`
-}
-
-type setSkillsRequest struct {
-	SkillIDs []int64 `json:"skillIds" binding:"required"` // [] clears all skills; missing is an error
-}
-
-type versionResponse struct {
-	Version int32 `json:"version"`
+func New(svc Service) *API {
+	return &API{svc: svc}
 }
 
 // GetProfile: GET /profile
-func (h *Handler) GetProfile(c *gin.Context) {
-	p, err := h.uc.GetProfile(c.Request.Context(), middleware.ActorFrom(c))
+func (h *API) GetProfile(c *gin.Context) {
+	p, err := h.svc.GetProfile(c.Request.Context(), middleware.ActorFrom(c))
 	if err != nil {
 		httputil.WriteError(c, err)
 		return
@@ -66,7 +34,7 @@ func (h *Handler) GetProfile(c *gin.Context) {
 }
 
 // UpdateContact: PUT /profile/contact/:field  (field = mobile | email | address)
-func (h *Handler) UpdateContact(c *gin.Context) {
+func (h *API) UpdateContact(c *gin.Context) {
 	version, err := httputil.IfMatchVersion(c)
 	if err != nil {
 		httputil.WriteError(c, err)
@@ -78,7 +46,7 @@ func (h *Handler) UpdateContact(c *gin.Context) {
 		return
 	}
 
-	v, err := h.uc.UpdateContact(c.Request.Context(), UpdateContactInput{
+	v, err := h.svc.UpdateContact(c.Request.Context(), service.UpdateContactInput{
 		Actor:   middleware.ActorFrom(c),
 		Field:   c.Param("field"),
 		Value:   *req.Value,
@@ -92,13 +60,8 @@ func (h *Handler) UpdateContact(c *gin.Context) {
 	c.JSON(http.StatusOK, versionResponse{Version: v})
 }
 
-type photoResponse struct {
-	Version  int32  `json:"version"`
-	PhotoURL string `json:"photoUrl"`
-}
-
 // UpdatePhoto: PUT /profile/photo  multipart field "file". The route sets the body limit.
-func (h *Handler) UpdatePhoto(c *gin.Context) {
+func (h *API) UpdatePhoto(c *gin.Context) {
 	version, err := httputil.IfMatchVersion(c)
 	if err != nil {
 		httputil.WriteError(c, err)
@@ -116,7 +79,7 @@ func (h *Handler) UpdatePhoto(c *gin.Context) {
 	}
 	defer file.Close()
 
-	v, name, err := h.uc.UpdatePhoto(c.Request.Context(), UpdatePhotoInput{
+	v, name, err := h.svc.UpdatePhoto(c.Request.Context(), service.UpdatePhotoInput{
 		Actor:   middleware.ActorFrom(c),
 		File:    file,
 		Version: version,
@@ -130,7 +93,7 @@ func (h *Handler) UpdatePhoto(c *gin.Context) {
 }
 
 // SetSkills: PUT /profile/skills  body {skillIds: number[]}
-func (h *Handler) SetSkills(c *gin.Context) {
+func (h *API) SetSkills(c *gin.Context) {
 	version, err := httputil.IfMatchVersion(c)
 	if err != nil {
 		httputil.WriteError(c, err)
@@ -142,7 +105,7 @@ func (h *Handler) SetSkills(c *gin.Context) {
 		return
 	}
 
-	v, err := h.uc.SetSkills(c.Request.Context(), SetSkillsInput{
+	v, err := h.svc.SetSkills(c.Request.Context(), service.SetSkillsInput{
 		Actor:    middleware.ActorFrom(c),
 		SkillIDs: req.SkillIDs,
 		Version:  version,
@@ -155,13 +118,8 @@ func (h *Handler) SetSkills(c *gin.Context) {
 	c.JSON(http.StatusOK, versionResponse{Version: v})
 }
 
-type updateNameRequest struct {
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-}
-
 // AdminUpdateName: PUT /admin/employees/:id/name {firstName, lastName} + If-Match
-func (h *Handler) AdminUpdateName(c *gin.Context) {
+func (h *API) AdminUpdateName(c *gin.Context) {
 	id, ok := httputil.PathID(c, "id")
 	if !ok {
 		return
@@ -176,7 +134,7 @@ func (h *Handler) AdminUpdateName(c *gin.Context) {
 		httputil.WriteError(c, shared.NewValidationError("body", "must be JSON with firstName and lastName"))
 		return
 	}
-	v, err := h.uc.UpdateName(c.Request.Context(), UpdateNameInput{
+	v, err := h.svc.UpdateName(c.Request.Context(), service.UpdateNameInput{
 		Actor: middleware.ActorFrom(c), EmployeeID: id,
 		FirstName: req.FirstName, LastName: req.LastName, Version: version,
 	})
@@ -188,7 +146,7 @@ func (h *Handler) AdminUpdateName(c *gin.Context) {
 	c.JSON(http.StatusOK, versionResponse{Version: v})
 }
 
-func toProfileResponse(p profiledomain.Profile) profileResponse {
+func toProfileResponse(p domain.Profile) profileResponse {
 	res := profileResponse{
 		ID:           p.ID,
 		EmployeeCode: p.EmployeeCode,

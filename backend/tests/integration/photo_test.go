@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/profile"
+	profileservice "employee-portal/modules/profile/service"
 	"employee-portal/modules/shared"
 )
 
@@ -42,10 +42,10 @@ func filesIn(t *testing.T, dir string) []string {
 func TestUpdatePhoto_ReplacesFileAndLogs(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
-	uc, dir := newProfileUsecaseWithDir(t)
+	uc, dir := newProfileServiceWithDir(t)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
-	v, first, err := uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{Actor: actor, File: bytes.NewReader(testPNG(t, 1200, 800)), Version: 1})
+	v, first, err := uc.UpdatePhoto(ctx, profileservice.UpdatePhotoInput{Actor: actor, File: bytes.NewReader(testPNG(t, 1200, 800)), Version: 1})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, v)
 	assert.Equal(t, []string{first}, filesIn(t, dir))
@@ -55,7 +55,7 @@ func TestUpdatePhoto_ReplacesFileAndLogs(t *testing.T) {
 	assert.Equal(t, "jpeg", format)
 	assert.Equal(t, 512, cfg.Width)
 
-	_, second, err := uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{Actor: actor, File: bytes.NewReader(testPNG(t, 64, 64)), Version: 2})
+	_, second, err := uc.UpdatePhoto(ctx, profileservice.UpdatePhotoInput{Actor: actor, File: bytes.NewReader(testPNG(t, 64, 64)), Version: 2})
 	require.NoError(t, err)
 	assert.Equal(t, []string{second}, filesIn(t, dir), "old file removed after commit")
 
@@ -68,17 +68,17 @@ func TestUpdatePhoto_ReplacesFileAndLogs(t *testing.T) {
 func TestUpdatePhoto_FailureLeavesNoOrphanFile(t *testing.T) {
 	ctx := context.Background()
 	_, empID, _ := newEmployee(t, "0811111111")
-	uc, dir := newProfileUsecaseWithDir(t)
+	uc, dir := newProfileServiceWithDir(t)
 
 	// Stale version → conflict after the file was saved.
-	_, _, err := uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{
+	_, _, err := uc.UpdatePhoto(ctx, profileservice.UpdatePhotoInput{
 		Actor: shared.Actor{UserID: 1, EmployeeID: empID}, File: bytes.NewReader(testPNG(t, 10, 10)), Version: 99,
 	})
 	assert.ErrorIs(t, err, shared.ErrConflict)
 	assert.Empty(t, filesIn(t, dir))
 
 	// Log insert fails (unknown changed_by) → DB rolls back and the file is deleted.
-	_, _, err = uc.UpdatePhoto(ctx, profile.UpdatePhotoInput{
+	_, _, err = uc.UpdatePhoto(ctx, profileservice.UpdatePhotoInput{
 		Actor: shared.Actor{UserID: 999_999_999, EmployeeID: empID}, File: bytes.NewReader(testPNG(t, 10, 10)), Version: 1,
 	})
 	require.Error(t, err)
@@ -91,8 +91,8 @@ func TestUpdatePhoto_FailureLeavesNoOrphanFile(t *testing.T) {
 
 func TestUpdatePhoto_RejectsNonImage(t *testing.T) {
 	_, empID, _ := newEmployee(t, "0811111111")
-	uc, dir := newProfileUsecaseWithDir(t)
-	_, _, err := uc.UpdatePhoto(context.Background(), profile.UpdatePhotoInput{
+	uc, dir := newProfileServiceWithDir(t)
+	_, _, err := uc.UpdatePhoto(context.Background(), profileservice.UpdatePhotoInput{
 		Actor: shared.Actor{UserID: 1, EmployeeID: empID}, File: bytes.NewReader([]byte("not an image, renamed to .jpg")), Version: 1,
 	})
 	assert.ErrorIs(t, err, shared.ErrPhotoFormat)

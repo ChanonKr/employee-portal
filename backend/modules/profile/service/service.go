@@ -1,11 +1,11 @@
-package profile
+package service
 
 import (
 	"context"
 	"io"
 	"log/slog"
 
-	profiledomain "employee-portal/modules/profile/domain"
+	"employee-portal/modules/profile/domain"
 	"employee-portal/modules/shared"
 	skilldomain "employee-portal/modules/skill/domain"
 )
@@ -45,34 +45,35 @@ type Deps struct {
 	Log    *slog.Logger
 }
 
-type usecase struct {
+// Service runs this feature's use cases. It never imports GORM or Gin.
+type Service struct {
 	repo   Repository
 	photos PhotoProcessor
 	files  FileStorage
 	log    *slog.Logger
 }
 
-func NewUsecase(d Deps) Usecase {
+func New(d Deps) *Service {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
-	return &usecase{repo: d.Repo, photos: d.Photos, files: d.Files, log: d.Log}
+	return &Service{repo: d.Repo, photos: d.Photos, files: d.Files, log: d.Log}
 }
 
-func (u *usecase) GetProfile(ctx context.Context, actor shared.Actor) (profiledomain.Profile, error) {
-	return u.repo.GetProfile(ctx, actor.EmployeeID)
+func (svc *Service) GetProfile(ctx context.Context, actor shared.Actor) (domain.Profile, error) {
+	return svc.repo.GetProfile(ctx, actor.EmployeeID)
 }
 
 // UpdateContact: lock row → apply domain rule → save (version + 1) → log if changed.
 // The update and its history entry commit together or not at all.
-func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int32, error) {
-	field, err := profiledomain.ParseContactField(in.Field)
+func (svc *Service) UpdateContact(ctx context.Context, in UpdateContactInput) (int32, error) {
+	field, err := domain.ParseContactField(in.Field)
 	if err != nil {
 		return 0, err
 	}
 
 	var newVersion int32
-	err = u.repo.WithTx(ctx, func(tx TxRepository) error {
+	err = svc.repo.WithTx(ctx, func(tx TxRepository) error {
 		emp, err := tx.GetForUpdate(ctx, in.Actor.EmployeeID)
 		if err != nil {
 			return err
@@ -97,14 +98,14 @@ func (u *usecase) UpdateContact(ctx context.Context, in UpdateContactInput) (int
 
 // SetSkills replaces the employee's whole skill set in one request:
 // lock row → load current + requested skills → apply domain rule → replace → version + 1 → log if changed.
-func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, error) {
+func (svc *Service) SetSkills(ctx context.Context, in SetSkillsInput) (int32, error) {
 	// Reject a malformed list before opening a transaction (ChangeSkills checks it again).
 	if err := skilldomain.ValidateSkillIDs(in.SkillIDs); err != nil {
 		return 0, err
 	}
 
 	var newVersion int32
-	err := u.repo.WithTx(ctx, func(tx TxRepository) error {
+	err := svc.repo.WithTx(ctx, func(tx TxRepository) error {
 		emp, err := tx.GetForUpdate(ctx, in.Actor.EmployeeID)
 		if err != nil {
 			return err
@@ -145,12 +146,12 @@ func (u *usecase) SetSkills(ctx context.Context, in SetSkillsInput) (int32, erro
 //  3. tx: lock → check version → set photo_path → log
 //     failure → delete the new file, so no orphan is left
 //     success → delete the old file (best effort: an orphan file is harmless)
-func (u *usecase) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32, string, error) {
-	jpeg, err := u.photos.Normalize(in.File)
+func (svc *Service) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32, string, error) {
+	jpeg, err := svc.photos.Normalize(in.File)
 	if err != nil {
 		return 0, "", err
 	}
-	name, err := u.files.Save(ctx, jpeg, ".jpg")
+	name, err := svc.files.Save(ctx, jpeg, ".jpg")
 	if err != nil {
 		return 0, "", err
 	}
@@ -159,7 +160,7 @@ func (u *usecase) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32, 
 		newVersion int32
 		oldName    *string
 	)
-	err = u.repo.WithTx(ctx, func(tx TxRepository) error {
+	err = svc.repo.WithTx(ctx, func(tx TxRepository) error {
 		emp, err := tx.GetForUpdate(ctx, in.Actor.EmployeeID)
 		if err != nil {
 			return err
@@ -175,30 +176,30 @@ func (u *usecase) UpdatePhoto(ctx context.Context, in UpdatePhotoInput) (int32, 
 		return tx.AppendChange(ctx, emp.ID, *change, in.Actor)
 	})
 	if err != nil {
-		u.deleteFile(ctx, name, "rollback new photo")
+		svc.deleteFile(ctx, name, "rollback new photo")
 		return 0, "", err
 	}
 	if oldName != nil {
-		u.deleteFile(ctx, *oldName, "remove replaced photo")
+		svc.deleteFile(ctx, *oldName, "remove replaced photo")
 	}
 	return newVersion, name, nil
 }
 
-func (u *usecase) deleteFile(ctx context.Context, name, reason string) {
+func (svc *Service) deleteFile(ctx context.Context, name, reason string) {
 	// Use a fresh context: the request may already be cancelled.
-	if err := u.files.Delete(context.WithoutCancel(ctx), name); err != nil {
-		u.log.WarnContext(ctx, "could not delete photo file", "file", name, "reason", reason, "error", err)
+	if err := svc.files.Delete(context.WithoutCancel(ctx), name); err != nil {
+		svc.log.WarnContext(ctx, "could not delete photo file", "file", name, "reason", reason, "error", err)
 	}
 }
 
 // UpdateName is the only way to change a name (employees have no route for it).
 // Each changed part is logged separately with the admin as changed_by.
-func (u *usecase) UpdateName(ctx context.Context, in UpdateNameInput) (int32, error) {
+func (svc *Service) UpdateName(ctx context.Context, in UpdateNameInput) (int32, error) {
 	if err := shared.RequireAdmin(in.Actor); err != nil {
 		return 0, err
 	}
 	var newVersion int32
-	err := u.repo.WithTx(ctx, func(tx TxRepository) error {
+	err := svc.repo.WithTx(ctx, func(tx TxRepository) error {
 		emp, err := tx.GetForUpdate(ctx, in.EmployeeID)
 		if err != nil {
 			return err

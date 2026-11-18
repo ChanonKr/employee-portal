@@ -20,8 +20,10 @@ import (
 )
 
 const (
-	jsonBodyLimit  = 64 << 10 // 64 KB for JSON endpoints
-	requestTimeout = 15 * time.Second
+	jsonBodyLimit = 64 << 10 // 64 KB for JSON endpoints
+	// multipartOverhead leaves room for multipart headers around the photo itself.
+	multipartOverhead = 64 << 10
+	requestTimeout    = 15 * time.Second
 )
 
 type Server struct {

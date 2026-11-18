@@ -10,17 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/profile"
+	profileservice "employee-portal/modules/profile/service"
 	"employee-portal/modules/shared"
 )
 
 func TestUpdateContact_WritesValueAndLogTogether(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
-	uc := newProfileUsecase(t)
+	uc := newProfileService(t)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
-	v, err := uc.UpdateContact(ctx, profile.UpdateContactInput{Actor: actor, Field: "mobile", Value: "0812345678", Version: 1})
+	v, err := uc.UpdateContact(ctx, profileservice.UpdateContactInput{Actor: actor, Field: "mobile", Value: "0812345678", Version: 1})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, v)
 	assert.Equal(t, 1, countLogs(t, empID))
@@ -32,7 +32,7 @@ func TestUpdateContact_WritesValueAndLogTogether(t *testing.T) {
 	assert.Equal(t, `"0812345678"`, newV)
 
 	// Same value again: version moves, no new log.
-	v, err = uc.UpdateContact(ctx, profile.UpdateContactInput{Actor: actor, Field: "mobile", Value: "081-234-5678", Version: 2})
+	v, err = uc.UpdateContact(ctx, profileservice.UpdateContactInput{Actor: actor, Field: "mobile", Value: "081-234-5678", Version: 2})
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, v)
 	assert.Equal(t, 1, countLogs(t, empID))
@@ -41,7 +41,7 @@ func TestUpdateContact_WritesValueAndLogTogether(t *testing.T) {
 func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 	ctx := context.Background()
 	userID, empID, _ := newEmployee(t, "0811111111")
-	uc := newProfileUsecase(t)
+	uc := newProfileService(t)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	const n = 5
@@ -53,7 +53,7 @@ func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = uc.UpdateContact(ctx, profile.UpdateContactInput{
+			_, errs[i] = uc.UpdateContact(ctx, profileservice.UpdateContactInput{
 				Actor: actor, Field: "address", Value: "Address from request", Version: 1,
 			})
 		}()
@@ -78,11 +78,11 @@ func TestUpdateContact_ConcurrentSameVersion_OneWinsOneConflicts(t *testing.T) {
 func TestUpdateContact_LogFailureRollsBackUpdate(t *testing.T) {
 	ctx := context.Background()
 	_, empID, _ := newEmployee(t, "0811111111")
-	uc := newProfileUsecase(t)
+	uc := newProfileService(t)
 
 	// changed_by references a user that does not exist → the log insert fails (FK).
 	ghost := shared.Actor{UserID: 999_999_999, EmployeeID: empID}
-	_, err := uc.UpdateContact(ctx, profile.UpdateContactInput{Actor: ghost, Field: "mobile", Value: "0899999999", Version: 1})
+	_, err := uc.UpdateContact(ctx, profileservice.UpdateContactInput{Actor: ghost, Field: "mobile", Value: "0899999999", Version: 1})
 	require.Error(t, err)
 
 	var mobile string

@@ -23,7 +23,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"gorm.io/gorm"
 
-	"employee-portal/modules/profile"
+	profilerepo "employee-portal/modules/profile/repo"
+	profileservice "employee-portal/modules/profile/service"
 	"employee-portal/pkg/database"
 	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/storage"
@@ -128,22 +129,22 @@ func countLogs(t *testing.T, employeeID int64) int {
 	return n
 }
 
-// newProfileUsecase wires the real repository, image processor and local storage
+// newProfileService wires the real repository, image processor and local storage
 // (in a temp dir) — the same pieces the server uses.
-func newProfileUsecase(t *testing.T) profile.Usecase {
-	uc, _ := newProfileUsecaseWithDir(t)
+func newProfileService(t *testing.T) *profileservice.Service {
+	uc, _ := newProfileServiceWithDir(t)
 	return uc
 }
 
-func newProfileUsecaseWithDir(t *testing.T) (profile.Usecase, string) {
+func newProfileServiceWithDir(t *testing.T) (*profileservice.Service, string) {
 	t.Helper()
 	dir := t.TempDir()
 	files, err := storage.NewLocal(dir)
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}
-	return profile.NewUsecase(profile.Deps{
-		Repo:   profile.NewRepository(appDB),
+	return profileservice.New(profileservice.Deps{
+		Repo:   profilerepo.New(appDB),
 		Photos: imaging.NewProcessor(5 << 20),
 		Files:  files,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),

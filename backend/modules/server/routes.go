@@ -17,7 +17,9 @@ import (
 	historyapi "employee-portal/modules/history/api"
 	historyrepo "employee-portal/modules/history/repo"
 	historyservice "employee-portal/modules/history/service"
-	"employee-portal/modules/profile"
+	profileapi "employee-portal/modules/profile/api"
+	profilerepo "employee-portal/modules/profile/repo"
+	profileservice "employee-portal/modules/profile/service"
 	settingapi "employee-portal/modules/setting/api"
 	settingrepo "employee-portal/modules/setting/repo"
 	settingservice "employee-portal/modules/setting/service"
@@ -69,12 +71,27 @@ func (s *Server) routes() {
 	r.Admin.POST("/employees", auth.AdminCreateAccount)
 	r.Admin.POST("/employees/:id/reset-password", auth.AdminResetPassword)
 
-	profile.NewHandler(profile.NewUsecase(profile.Deps{
-		Repo:   profile.NewRepository(s.db),
+	// /profile/* takes the employee id from the token; the URL has no id.
+	profile := profileapi.New(profileservice.New(profileservice.Deps{
+		Repo:   profilerepo.New(s.db),
 		Photos: imaging.NewProcessor(s.cfg.UploadMaxBytes),
 		Files:  s.files,
 		Log:    s.log,
-	})).RegisterRoutes(r, s.cfg.UploadMaxBytes)
+	}))
+	p := r.API.Group("/profile", r.SignedIn, r.Ready, middleware.RequireProfile())
+	p.GET("", profile.GetProfile)
+	p.PUT("/contact/:field", profile.UpdateContact)
+	p.PUT("/skills", profile.SetSkills)
+	// No route changes the name: F2 is enforced by the server, not only the UI.
+
+	// The upload has its own group: a body limit sized for the file, not for JSON.
+	uploadLimiter := middleware.NewKeyedLimiter(10, time.Minute)
+	upload := r.Root.Group("/api/v1/profile",
+		middleware.BodyLimit(s.cfg.UploadMaxBytes+multipartOverhead),
+		r.SignedIn, r.Ready, middleware.RequireProfile(),
+		middleware.RateLimit(uploadLimiter, middleware.ByUser))
+	upload.PUT("/photo", profile.UpdatePhoto)
+	r.Admin.PUT("/employees/:id/name", profile.AdminUpdateName)
 
 	file.NewHandler(s.files).RegisterRoutes(r)
 
