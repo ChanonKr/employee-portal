@@ -34,7 +34,7 @@
 - มีระบบ Login แบบง่าย (seed users) — login ด้วย `employee_code` ไม่ใช้อีเมลติดต่อ เพราะอีเมลแก้ไขได้
 - มี 2 role: `employee`, `admin` — บัญชีถูกสร้างโดย HR/Admin (ไม่มี sign-up)
 - "7 วัน" = ช่วงที่**แสดง** ไม่ใช่ช่วงที่**เก็บ** → เก็บ log `HISTORY_RETENTION_DAYS` วัน (default 90) แล้ว retention job ลบ (§7.9) · ช่วงที่แสดงตั้งได้ไม่เกินช่วงที่เก็บ
-- Change history อยู่ใน PostgreSQL ตัวเดียวกัน เพื่อให้ update + log อยู่ใน transaction เดียว (ไม่แยก Mongo — ดู §12)
+- Change history อยู่ใน PostgreSQL ตัวเดียวกัน เพื่อให้ update + log อยู่ใน transaction เดียว (ไม่แยก Mongo — ดู §11)
 - **Business logic อยู่ใน Go (service layer)** · เข้าถึง DB ผ่าน GORM (เฉพาะใน package `repo`) · schema คุมด้วย SQL migration · transaction ควบคุมจาก service
 
 ---
@@ -127,7 +127,7 @@ employee-portal/
 │   │   ├── components/ui/              # Radix + Tailwind: dialog (ResponsiveDialog), photo-viewer (PhotoViewer), avatar, …
 │   │   └── lib/                        # format (formatPhone, timeAgo), useMediaQuery, …
 │   └── Dockerfile
-├── docs/                               # DESIGN.md, screenshots
+├── docs/                               # DESIGN.md
 ├── docker-compose.yml
 ├── Makefile                            # up, down, reset, migrate-up, run, test, test-integration, test-web, e2e, vet
 ├── .env.example
@@ -609,7 +609,7 @@ commit → ลบไฟล์ที่ไม่มีใครใช้ (best-ef
 ```
 - เก็บรูป = รูปปัจจุบัน + ทุกรูปที่อัปโหลดในช่วง retention + อีก 3 รูปก่อนหน้านั้น · `old_value` ของ change ที่เก่าที่สุดที่เหลืออาจชี้ไฟล์ที่ลบแล้ว → UI แสดง placeholder
 - API ยัง serve ได้แม้ retention DB เชื่อมไม่ได้ (log error) — เป็นงาน housekeeping
-- ทดสอบ: unit test ของ service (fake repo) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role) · ทดสอบกับ stack จริงด้วยการ backdate ข้อมูล: รูป 7 รูป (200/150/120/100/95/30/10 วัน) → ลบ 2 รูปแรก เก็บ 5 ตรงตามกฎ
+- ทดสอบ: unit test ของ service (fake repo) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role)
 - log ทุกรอบ: `retention: purged retentionDays=… deletedChanges=… deletedPhotos=…`
 
 ---
@@ -652,14 +652,6 @@ ValidateSkillIDs (≤ 20, ไม่ซ้ำ, > 0 — ตัดทิ้งก�
 | **Tailwind CSS** | utility-first, mobile-first breakpoints ใน class (`md:`, `lg:`) |
 | **Radix UI + Tailwind** (แนวเดียวกับ shadcn/ui แต่เขียนเองไม่ใช้ CLI) | component อยู่ในโปรเจกต์ (`components/ui/` — อธิบาย/แก้ได้ทุกบรรทัด), a11y (focus trap, aria) จาก Radix · Dialog ตัวเดียวเป็นทั้ง dialog (≥ 768px) และ bottom sheet (มือถือ) |
 | **nginx** เสิร์ฟ SPA + proxy `/api` | origin เดียวกับ API → cookie `SameSite=Strict; Path=/api` ใช้ได้โดยไม่ต้องตั้ง CORS · `/assets/*` cache ถาวร (ชื่อไฟล์มี hash), `index.html` no-cache |
-
-```ts
-// vite.config.ts
-export default defineConfig({
-  plugins: [react()],
-  server: { proxy: { '/api': 'http://localhost:8080' } },
-})
-```
 
 ### 9.2 Routes & Navigation
 | Path | หน้า | Guard |
@@ -796,7 +788,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 | `EMP-00002` | โปรไฟล์ว่าง | empty state + checklist |
 | `ADMIN-001` | role admin | หน้า Admin (login แล้วไป `/admin`, ไม่มีเมนู Profile) |
 
-รหัสผ่าน demo อยู่ใน seed file + README (ไม่แสดงบนหน้าจอ) · ข้อมูล seed เป็นข้อมูลสมมติทั้งหมด (ดู §14)
+รหัสผ่าน demo อยู่ใน seed file + README (ไม่แสดงบนหน้าจอ) · ข้อมูล seed เป็นข้อมูลสมมติทั้งหมด
 
 ---
 
@@ -842,47 +834,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 
 ---
 
-## 11. docker-compose (โครง)
-```yaml
-services:
-  postgres:
-    image: postgres:17-alpine
-    environment: { POSTGRES_DB: portal, POSTGRES_USER: owner, POSTGRES_PASSWORD: owner }
-    healthcheck: { test: ["CMD-SHELL", "pg_isready -U owner -d portal"], interval: 5s }
-    volumes:
-      - pg-data:/var/lib/postgresql/data
-      - ./backend/db-init:/docker-entrypoint-initdb.d:ro   # สร้าง role app + retention (LOGIN)
-  migrate:
-    image: migrate/migrate:v4.19.1
-    depends_on: { postgres: { condition: service_healthy } }
-    volumes: [./backend/pkg/database/migrations:/migrations:ro]
-    command: ["-path=/migrations", "-database=postgres://owner:owner@postgres:5432/portal?sslmode=disable", "up"]
-  api:
-    build: ./backend
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://app:app@postgres:5432/portal?sslmode=disable
-      RETENTION_DATABASE_URL: postgres://retention:retention@postgres:5432/portal?sslmode=disable
-      TRUSTED_PROXIES: 172.16.0.0/12               # ให้ rate limit เห็น IP จริงหลัง nginx
-      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-5}
-    depends_on: { migrate: { condition: service_completed_successfully } }
-    volumes: [uploads:/data/uploads]
-    ports: ["8080:8080"]
-  web:
-    build: ./frontend                               # nginx: เสิร์ฟ SPA + proxy /api → api
-    depends_on: [api]
-    ports: ["5173:80"]
-volumes: { pg-data: {}, uploads: {} }
-```
-`make up` สร้าง `.env` (สุ่ม `JWT_SECRET`) ถ้ายังไม่มี แล้วรัน `docker compose up -d --build`
-รหัสผ่านใน compose เป็นค่าสำหรับ local dev เท่านั้น (ดู §14)
-
-DB volume ที่สร้างก่อนมี `db-init/02_retention_role.sql` (role `retention` ถูกสร้างแบบ NOLOGIN โดย migration) → เปิด login ครั้งเดียว:
-`docker compose exec postgres psql -U owner -d portal -c "ALTER ROLE retention LOGIN PASSWORD 'retention'"` แล้ว `docker compose restart api` (หรือ `make reset` ถ้าลบข้อมูลได้)
-
----
-
-## 12. Design Decisions & Trade-offs (สำหรับ walkthrough)
+## 11. Design Decisions & Trade-offs
 
 | การตัดสินใจ | เหตุผล | สิ่งที่แลก |
 |---|---|---|
@@ -911,44 +863,7 @@ DB volume ที่สร้างก่อนมี `db-init/02_retention_role.
 
 ---
 
-## 13. Implementation Plan
-
-| ขั้น | งาน | Done เมื่อ |
-|---|---|---|
-| 1 | Repo (public), docker-compose, Makefile, `.env.example`, `.gitignore`, LICENSE | `make up` แล้ว Postgres healthy |
-| 2 | Migration: tables + roles/grants + seed users/skills/settings | `make migrate seed` ผ่าน |
-| 3 | GORM models + repositories + `WithTx` | `go build` ผ่าน, integration test ผ่าน |
-| 4 | Go skeleton: config, router, middleware, error envelope, `/healthz` | `curl /healthz` ok |
-| 5 | **Vertical slice:** `GET /profile` + `PUT /profile/contact/:field` (service + transaction + log) ครบทุกชั้น + หน้า Profile | แก้เบอร์จาก UI ได้จริง และเห็น log |
-| 6 | Auth (login/logout/me/middleware) | ต้อง login ก่อนเข้า `/profile/*` |
-| 7 | Endpoint ที่เหลือ: skills, photo, history | ครบ F1–F6 |
-| 8 | Frontend: Skills picker, Photo upload, Recent changes, History page, empty state, responsive | ครบทุกหน้า ทั้ง desktop และมือถือ |
-| 9 | Tests (unit + integration + E2E หลาย viewport) | CI เขียว |
-| 10 | README (screenshots, วิธีรัน, demo accounts, design decisions), ซ้อม demo / walkthrough (OpenAPI ยังไม่ได้ทำ — API อธิบายใน §6) | **พร้อมส่ง (core เสร็จ)** |
-| 11 | Admin Tier 1: role + RBAC, Skills, Settings | ปรับ skill / history days จากหน้าจอได้ |
-| 12 | Admin Tier 2: Employees list/detail, แก้ชื่อ, Dashboard | admin แก้ชื่อแล้วเห็นใน history |
-| 13 | Admin Tier 3: สร้างบัญชี, reset รหัส, must-change-password | ถ้ามีเวลา |
-| 14 | ปรับโครง backend: แยก `entity` เป็น `shared` + `domain` ต่อ feature, แต่ละ feature แยก package `domain`/`model`/`repo`/`service`/`api`, route ทั้งหมดใน `server/routes.go` | route table เท่าเดิมทุก endpoint, test ผ่านทั้งหมด |
-| 15 | History retention: `HISTORY_RETENTION_DAYS` (90), retention job + role `retention`, เก็บรูปเก่า + popup ดูรูป | ทดสอบกับข้อมูลที่ backdate แล้วลบ/เก็บตรงกฎ |
-
-### Nice-to-have (ถ้ามีเวลา)
+## 12. Future Work
 - Crop รูปก่อนอัปโหลด, dark mode, i18n TH/EN
 - History: ปุ่ม Revert, แจ้งเตือนเมื่ออีเมล/เบอร์ถูกเปลี่ยน, Export CSV (admin)
 - Outbox → Mongo (เพื่อโชว์แนวคิด)
-
----
-
-## 14. Public Repository Checklist
-
-Repo เป็น public — ใครก็อ่านได้ทั้งโค้ดและ commit history
-
-| เรื่อง | สิ่งที่ทำ |
-|---|---|
-| Secrets | ไม่ commit `.env` (อยู่ใน `.gitignore`), มีแค่ `.env.example` · `JWT_SECRET` ไม่มีค่า default ในโค้ด (ไม่ตั้ง = แอปไม่ start) · รหัสผ่านใน compose/seed เป็นค่า local dev ที่ระบุชัดว่าใช้ demo เท่านั้น |
-| Secret scanning | เปิด GitHub secret scanning + push protection · `gitleaks` ใน CI · ถ้าเผลอ commit secret → **เปลี่ยน secret ทันที** (ลบออกจาก history อย่างเดียวไม่พอ) |
-| ข้อมูลส่วนบุคคล | seed ใช้ชื่อ/เบอร์/อีเมลสมมติ (`@example.com`) · ไม่ commit รูปคนจริง · ไม่ commit ไฟล์ใน `uploads/` |
-| เอกสารของบริษัท | ไม่ commit ไฟล์ PDF โจทย์ — สรุป requirement ด้วยคำของตัวเองใน README |
-| Dependencies | เปิด Dependabot (Go modules, npm, GitHub Actions) |
-| License | ใส่ `LICENSE` (เช่น MIT) |
-| Commit history | commit ย่อยและข้อความสื่อความ (กรรมการอาจอ่าน history) · ไม่มี commit "fix", "wip" รัว ๆ บน `main` |
-| README | ภาพหน้าจอ desktop + mobile, วิธีรันใน 1 คำสั่ง, demo accounts, สรุป design decisions + ลิงก์ `docs/DESIGN.md` |
