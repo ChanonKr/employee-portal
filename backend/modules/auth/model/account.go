@@ -1,10 +1,10 @@
-package auth
+// Package model holds the GORM structs auth reads and writes (see
+// modules/profile/model for the rules); only repo uses them.
+package model
 
 import "time"
 
-// GORM structs for what this module touches (see profile/model.go for the rules).
-
-type userModel struct {
+type User struct {
 	ID                 int64 `gorm:"primaryKey"`
 	EmployeeCode       string
 	PasswordHash       string
@@ -14,15 +14,15 @@ type userModel struct {
 	CreatedAt          time.Time `gorm:"->"` // set by the database
 }
 
-func (userModel) TableName() string { return "users" }
+func (User) TableName() string { return "users" }
 
-// employeeModel is only what account creation writes: the empty profile row.
+// Employee is only what account creation writes: the empty profile row.
 // Version and the contact fields keep their database defaults.
-type employeeModel struct {
+type Employee struct {
 	ID        int64 `gorm:"primaryKey"`
 	UserID    int64
 	FirstName string
 	LastName  string
 }
 
-func (employeeModel) TableName() string { return "employees" }
+func (Employee) TableName() string { return "employees" }

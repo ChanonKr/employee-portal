@@ -7,7 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/auth"
+	authapi "employee-portal/modules/auth/api"
+	authrepo "employee-portal/modules/auth/repo"
+	authservice "employee-portal/modules/auth/service"
 	employeeapi "employee-portal/modules/employee/api"
 	employeerepo "employee-portal/modules/employee/repo"
 	employeeservice "employee-portal/modules/employee/service"
@@ -47,10 +49,25 @@ func (s *Server) routes() {
 		Ready:    ready,
 	}
 
-	auth.NewHandler(
-		auth.NewUsecase(auth.NewRepository(s.db), s.tokens),
-		auth.CookieOptions{Secure: s.cfg.IsProduction()},
-	).RegisterRoutes(r, s.cfg.LoginRateLimit)
+	auth := authapi.New(
+		authservice.New(authrepo.New(s.db), s.tokens),
+		authapi.CookieOptions{Secure: s.cfg.IsProduction()},
+	)
+	// Limits sign-in and password-change attempts (0 = default 5 per minute).
+	loginPerMinute := s.cfg.LoginRateLimit
+	if loginPerMinute < 1 {
+		loginPerMinute = 5 // zero value (e.g. a Config built in tests)
+	}
+	loginLimiter := middleware.NewKeyedLimiter(loginPerMinute, time.Minute)
+	// /auth/* only needs SignedIn, so a user on a temporary password can still
+	// see who they are and change it.
+	a := r.API.Group("/auth")
+	a.POST("/login", middleware.RateLimit(loginLimiter, middleware.ByIP), auth.Login)
+	a.POST("/logout", auth.Logout)
+	a.GET("/me", r.SignedIn, auth.Me)
+	a.POST("/change-password", r.SignedIn, middleware.RateLimit(loginLimiter, middleware.ByUser), auth.ChangePassword)
+	r.Admin.POST("/employees", auth.AdminCreateAccount)
+	r.Admin.POST("/employees/:id/reset-password", auth.AdminResetPassword)
 
 	profile.NewHandler(profile.NewUsecase(profile.Deps{
 		Repo:   profile.NewRepository(s.db),

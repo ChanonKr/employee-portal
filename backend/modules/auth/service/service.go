@@ -1,11 +1,11 @@
-package auth
+package service
 
 import (
 	"context"
 	"errors"
 	"time"
 
-	authdomain "employee-portal/modules/auth/domain"
+	"employee-portal/modules/auth/domain"
 	"employee-portal/modules/shared"
 	"employee-portal/pkg/security"
 )
@@ -13,7 +13,7 @@ import (
 type Session struct {
 	Token     string
 	ExpiresAt time.Time
-	User      authdomain.User
+	User      domain.User
 }
 
 type CreateAccountInput struct {
@@ -30,25 +30,26 @@ type CreatedAccount struct {
 	TemporaryPassword string // shown to the admin once; never stored in plain text
 }
 
-type usecase struct {
+// Service runs this feature's use cases. It never imports GORM or Gin.
+type Service struct {
 	repo   Repository
 	tokens TokenIssuer
 }
 
-func NewUsecase(repo Repository, tokens TokenIssuer) Usecase {
-	return &usecase{repo: repo, tokens: tokens}
+func New(repo Repository, tokens TokenIssuer) *Service {
+	return &Service{repo: repo, tokens: tokens}
 }
 
 // Login returns the same ErrUnauthorized for an unknown code, a wrong password and
 // a disabled account, so callers cannot tell which employee codes exist.
-func (u *usecase) Login(ctx context.Context, employeeCode, password string) (Session, error) {
-	code, err := authdomain.NormalizeEmployeeCode(employeeCode)
+func (svc *Service) Login(ctx context.Context, employeeCode, password string) (Session, error) {
+	code, err := domain.NormalizeEmployeeCode(employeeCode)
 	if err != nil {
 		security.BurnPasswordCheck(password)
 		return Session{}, shared.ErrUnauthorized
 	}
 
-	user, err := u.repo.GetUserByCode(ctx, code)
+	user, err := svc.repo.GetUserByCode(ctx, code)
 	if errors.Is(err, shared.ErrNotFound) {
 		security.BurnPasswordCheck(password)
 		return Session{}, shared.ErrUnauthorized
@@ -59,26 +60,26 @@ func (u *usecase) Login(ctx context.Context, employeeCode, password string) (Ses
 	if !security.CheckPassword(user.PasswordHash, password) || !user.IsActive {
 		return Session{}, shared.ErrUnauthorized
 	}
-	return u.issue(user)
+	return svc.issue(user)
 }
 
 // Me re-reads the user so a disabled account loses access on the next app load.
-func (u *usecase) Me(ctx context.Context, actor shared.Actor) (authdomain.User, error) {
-	user, err := u.repo.GetUserByID(ctx, actor.UserID)
+func (svc *Service) Me(ctx context.Context, actor shared.Actor) (domain.User, error) {
+	user, err := svc.repo.GetUserByID(ctx, actor.UserID)
 	if errors.Is(err, shared.ErrNotFound) {
-		return authdomain.User{}, shared.ErrUnauthorized
+		return domain.User{}, shared.ErrUnauthorized
 	}
 	if err != nil {
-		return authdomain.User{}, err
+		return domain.User{}, err
 	}
 	if !user.IsActive {
-		return authdomain.User{}, shared.ErrUnauthorized
+		return domain.User{}, shared.ErrUnauthorized
 	}
 	return user, nil
 }
 
-func (u *usecase) ChangePassword(ctx context.Context, actor shared.Actor, current, next string) (Session, error) {
-	user, err := u.Me(ctx, actor)
+func (svc *Service) ChangePassword(ctx context.Context, actor shared.Actor, current, next string) (Session, error) {
+	user, err := svc.Me(ctx, actor)
 	if err != nil {
 		return Session{}, err
 	}
@@ -86,7 +87,7 @@ func (u *usecase) ChangePassword(ctx context.Context, actor shared.Actor, curren
 	if !security.CheckPassword(user.PasswordHash, current) {
 		return Session{}, shared.NewValidationError("currentPassword", "is incorrect")
 	}
-	if err := authdomain.ValidateNewPassword("newPassword", next); err != nil {
+	if err := domain.ValidateNewPassword("newPassword", next); err != nil {
 		return Session{}, err
 	}
 	if current == next {
@@ -97,18 +98,18 @@ func (u *usecase) ChangePassword(ctx context.Context, actor shared.Actor, curren
 	if err != nil {
 		return Session{}, err
 	}
-	if err := u.repo.SetPassword(ctx, user.ID, hash, false); err != nil {
+	if err := svc.repo.SetPassword(ctx, user.ID, hash, false); err != nil {
 		return Session{}, err
 	}
 	user.MustChangePassword = false
-	return u.issue(user)
+	return svc.issue(user)
 }
 
-func (u *usecase) CreateAccount(ctx context.Context, actor shared.Actor, in CreateAccountInput) (CreatedAccount, error) {
+func (svc *Service) CreateAccount(ctx context.Context, actor shared.Actor, in CreateAccountInput) (CreatedAccount, error) {
 	if err := shared.RequireAdmin(actor); err != nil {
 		return CreatedAccount{}, err
 	}
-	acc, err := authdomain.NormalizeNewAccount(in.EmployeeCode, in.FirstName, in.LastName, in.Role)
+	acc, err := domain.NormalizeNewAccount(in.EmployeeCode, in.FirstName, in.LastName, in.Role)
 	if err != nil {
 		return CreatedAccount{}, err
 	}
@@ -116,7 +117,7 @@ func (u *usecase) CreateAccount(ctx context.Context, actor shared.Actor, in Crea
 	if err != nil {
 		return CreatedAccount{}, err
 	}
-	userID, empID, err := u.repo.CreateAccount(ctx, acc, hash)
+	userID, empID, err := svc.repo.CreateAccount(ctx, acc, hash)
 	if err != nil {
 		return CreatedAccount{}, err
 	}
@@ -124,11 +125,11 @@ func (u *usecase) CreateAccount(ctx context.Context, actor shared.Actor, in Crea
 }
 
 // ResetPassword sets a new temporary password that must be changed at next sign-in.
-func (u *usecase) ResetPassword(ctx context.Context, actor shared.Actor, employeeID int64) (string, error) {
+func (svc *Service) ResetPassword(ctx context.Context, actor shared.Actor, employeeID int64) (string, error) {
 	if err := shared.RequireAdmin(actor); err != nil {
 		return "", err
 	}
-	userID, err := u.repo.UserIDByEmployee(ctx, employeeID)
+	userID, err := svc.repo.UserIDByEmployee(ctx, employeeID)
 	if err != nil {
 		return "", err
 	}
@@ -136,18 +137,18 @@ func (u *usecase) ResetPassword(ctx context.Context, actor shared.Actor, employe
 	if err != nil {
 		return "", err
 	}
-	if err := u.repo.SetPassword(ctx, userID, hash, true); err != nil {
+	if err := svc.repo.SetPassword(ctx, userID, hash, true); err != nil {
 		return "", err
 	}
 	return temp, nil
 }
 
-func (u *usecase) issue(user authdomain.User) (Session, error) {
+func (svc *Service) issue(user domain.User) (Session, error) {
 	actor := shared.Actor{UserID: user.ID, Role: user.Role, MustChangePassword: user.MustChangePassword}
 	if user.EmployeeID != nil {
 		actor.EmployeeID = *user.EmployeeID
 	}
-	token, exp, err := u.tokens.Issue(actor)
+	token, exp, err := svc.tokens.Issue(actor)
 	if err != nil {
 		return Session{}, err
 	}
