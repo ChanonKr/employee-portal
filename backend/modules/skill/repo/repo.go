@@ -1,4 +1,4 @@
-package skill
+package repo
 
 import (
 	"context"
@@ -6,58 +6,63 @@ import (
 	"gorm.io/gorm"
 
 	"employee-portal/modules/shared"
-	skilldomain "employee-portal/modules/skill/domain"
+	"employee-portal/modules/skill/domain"
+	"employee-portal/modules/skill/model"
+	"employee-portal/modules/skill/service"
 	"employee-portal/pkg/database"
 )
 
-type repository struct {
+// Repository stores the skill catalog with GORM.
+type Repository struct {
 	db *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) Repository {
-	return &repository{db: db}
+var _ service.Repository = (*Repository)(nil)
+
+func New(db *gorm.DB) *Repository {
+	return &Repository{db: db}
 }
 
 // ListActive returns the picker catalog.
-func (r *repository) ListActive(ctx context.Context) ([]skilldomain.Skill, error) {
-	var rows []skillModel
-	if err := r.db.WithContext(ctx).Where("is_active").Scopes(displayOrder).Find(&rows).Error; err != nil {
+func (r *Repository) ListActive(ctx context.Context) ([]domain.Skill, error) {
+	var rows []model.Skill
+	if err := r.db.WithContext(ctx).Where("is_active").Scopes(model.DisplayOrder).Find(&rows).Error; err != nil {
 		return nil, database.MapError(err)
 	}
-	skills := make([]skilldomain.Skill, len(rows))
+	skills := make([]domain.Skill, len(rows))
 	for i, row := range rows {
-		skills[i] = row.toEntity()
+		skills[i] = row.ToDomain()
 	}
 	return skills, nil
 }
 
-func (r *repository) ListAll(ctx context.Context) ([]skilldomain.SkillUsage, error) {
+func (r *Repository) ListAll(ctx context.Context) ([]domain.SkillUsage, error) {
 	var rows []struct {
-		Skill  skillModel `gorm:"embedded"` // named: GORM skips anonymous unexported types
+		Skill  model.Skill `gorm:"embedded"` // named: GORM skips anonymous unexported types
 		UsedBy int64
 	}
-	err := r.db.WithContext(ctx).Model(&skillModel{}).
+	err := r.db.WithContext(ctx).Model(&model.Skill{}).
 		Select("skills.*, count(es.employee_id) AS used_by").
 		Joins("LEFT JOIN employee_skills es ON es.skill_id = skills.id").
 		Group("skills.id").
-		Scopes(displayOrder).
+		Scopes(model.DisplayOrder).
 		Find(&rows).Error
 	if err != nil {
 		return nil, database.MapError(err)
 	}
-	out := make([]skilldomain.SkillUsage, len(rows))
+	out := make([]domain.SkillUsage, len(rows))
 	for i, row := range rows {
-		out[i] = skilldomain.SkillUsage{Skill: row.Skill.toEntity(), SortOrder: row.Skill.SortOrder, UsedBy: row.UsedBy}
+		out[i] = domain.SkillUsage{Skill: row.Skill.ToDomain(), SortOrder: row.Skill.SortOrder, UsedBy: row.UsedBy}
 	}
 	return out, nil
 }
 
 // Create puts the new skill at the end of the list.
-func (r *repository) Create(ctx context.Context, name string) (int64, error) {
-	s := skillModel{Name: name}
+func (r *Repository) Create(ctx context.Context, name string) (int64, error) {
+	s := model.Skill{Name: name}
 	err := database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		var last int32
-		if err := tx.Model(&skillModel{}).Select("COALESCE(MAX(sort_order), 0)").Scan(&last).Error; err != nil {
+		if err := tx.Model(&model.Skill{}).Select("COALESCE(MAX(sort_order), 0)").Scan(&last).Error; err != nil {
 			return database.MapError(err)
 		}
 		s.SortOrder = last + 1
@@ -66,7 +71,7 @@ func (r *repository) Create(ctx context.Context, name string) (int64, error) {
 	return s.ID, err
 }
 
-func (r *repository) Update(ctx context.Context, id int64, name *string, isActive *bool) error {
+func (r *Repository) Update(ctx context.Context, id int64, name *string, isActive *bool) error {
 	fields := map[string]any{}
 	if name != nil {
 		fields["name"] = *name
@@ -74,7 +79,7 @@ func (r *repository) Update(ctx context.Context, id int64, name *string, isActiv
 	if isActive != nil {
 		fields["is_active"] = *isActive
 	}
-	db := r.db.WithContext(ctx).Model(&skillModel{}).Where("id = ?", id)
+	db := r.db.WithContext(ctx).Model(&model.Skill{}).Where("id = ?", id)
 	if len(fields) == 0 { // nothing to change: only report whether the skill exists
 		var n int64
 		if err := db.Count(&n).Error; err != nil {
@@ -96,10 +101,10 @@ func (r *repository) Update(ctx context.Context, id int64, name *string, isActiv
 }
 
 // Reorder applies every position or none: an unknown id rolls back the transaction.
-func (r *repository) Reorder(ctx context.Context, items []skilldomain.SkillOrder) error {
+func (r *Repository) Reorder(ctx context.Context, items []domain.SkillOrder) error {
 	return database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		for _, it := range items {
-			res := tx.Model(&skillModel{}).Where("id = ?", it.ID).Update("sort_order", it.SortOrder)
+			res := tx.Model(&model.Skill{}).Where("id = ?", it.ID).Update("sort_order", it.SortOrder)
 			if res.Error != nil {
 				return database.MapError(res.Error)
 			}

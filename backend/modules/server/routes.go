@@ -14,7 +14,9 @@ import (
 	"employee-portal/modules/profile"
 	"employee-portal/modules/setting"
 	"employee-portal/modules/shared"
-	"employee-portal/modules/skill"
+	skillapi "employee-portal/modules/skill/api"
+	skillrepo "employee-portal/modules/skill/repo"
+	skillservice "employee-portal/modules/skill/service"
 	"employee-portal/pkg/database"
 	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/middleware"
@@ -52,10 +54,16 @@ func (s *Server) routes() {
 	})).RegisterRoutes(r, s.cfg.UploadMaxBytes)
 
 	history.NewHandler(history.NewUsecase(history.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
-	skill.NewHandler(skill.NewUsecase(skill.NewRepository(s.db))).RegisterRoutes(r)
 	setting.NewHandler(setting.NewUsecase(setting.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
 	employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.db))).RegisterRoutes(r)
 	file.NewHandler(s.files).RegisterRoutes(r)
+
+	skills := skillapi.New(skillservice.New(skillrepo.New(s.db)))
+	r.API.GET("/skills", r.SignedIn, r.Ready, skills.List)
+	r.Admin.GET("/skills", skills.AdminList)
+	r.Admin.POST("/skills", skills.Create)
+	r.Admin.PATCH("/skills/:id", skills.Update)
+	r.Admin.PUT("/skills/order", skills.Reorder)
 }
 
 func (s *Server) health(c *gin.Context) {

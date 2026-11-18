@@ -13,7 +13,8 @@ import (
 
 	"employee-portal/modules/profile"
 	"employee-portal/modules/shared"
-	"employee-portal/modules/skill"
+	skillrepo "employee-portal/modules/skill/repo"
+	skillservice "employee-portal/modules/skill/service"
 )
 
 // newSkill adds a uniquely named skill so tests do not depend on the seed catalog.
@@ -95,7 +96,7 @@ func TestSetSkills_InactiveSkill(t *testing.T) {
 	assert.ElementsMatch(t, []int64{active, retired}, employeeSkillIDs(t, empID))
 
 	// It is still hidden from the picker.
-	catalog, err := skill.NewUsecase(skill.NewRepository(appDB)).ListActive(ctx)
+	catalog, err := skillservice.New(skillrepo.New(appDB)).ListActive(ctx)
 	require.NoError(t, err)
 	for _, s := range catalog {
 		assert.NotEqual(t, retired, s.ID)
