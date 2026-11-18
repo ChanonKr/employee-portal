@@ -1,6 +1,6 @@
-// Package file serves stored photos. It has no use case layer: it only streams a
-// file by name, and pkg/storage already validates the name.
-package file
+// Package api serves stored photos. The file feature has no domain, service or
+// repo: it only streams a file by name, and pkg/storage already validates the name.
+package api
 
 import (
 	"context"
@@ -18,16 +18,17 @@ type Reader interface {
 	Open(ctx context.Context, name string) (io.ReadSeekCloser, time.Time, error)
 }
 
-type Handler struct {
+// API is the HTTP adapter for stored files. Routes are registered in modules/server.
+type API struct {
 	files Reader
 }
 
-func NewHandler(files Reader) *Handler {
-	return &Handler{files: files}
+func New(files Reader) *API {
+	return &API{files: files}
 }
 
 // Photo: GET /files/photos/:name (signed-in users only).
-func (h *Handler) Photo(c *gin.Context) {
+func (h *API) Photo(c *gin.Context) {
 	name := c.Param("name")
 	f, modTime, err := h.files.Open(c.Request.Context(), name)
 	if err != nil {

@@ -7,115 +7,80 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	authapi "employee-portal/modules/auth/api"
-	authrepo "employee-portal/modules/auth/repo"
-	authservice "employee-portal/modules/auth/service"
-	employeeapi "employee-portal/modules/employee/api"
-	employeerepo "employee-portal/modules/employee/repo"
-	employeeservice "employee-portal/modules/employee/service"
-	"employee-portal/modules/file"
-	historyapi "employee-portal/modules/history/api"
-	historyrepo "employee-portal/modules/history/repo"
-	historyservice "employee-portal/modules/history/service"
-	profileapi "employee-portal/modules/profile/api"
-	profilerepo "employee-portal/modules/profile/repo"
-	profileservice "employee-portal/modules/profile/service"
-	settingapi "employee-portal/modules/setting/api"
-	settingrepo "employee-portal/modules/setting/repo"
-	settingservice "employee-portal/modules/setting/service"
 	"employee-portal/modules/shared"
-	skillapi "employee-portal/modules/skill/api"
-	skillrepo "employee-portal/modules/skill/repo"
-	skillservice "employee-portal/modules/skill/service"
 	"employee-portal/pkg/database"
-	"employee-portal/pkg/imaging"
 	"employee-portal/pkg/middleware"
-	"employee-portal/pkg/router"
 )
 
-// routes builds the shared groups and middleware, wires each module
-// (repository → use case → handler) and lets the module register its own routes.
-// This is the only place that knows about every module.
+const (
+	defaultLoginPerMinute = 5
+	uploadPerMinute       = 10
+)
+
+// routes is the single route table: every endpoint, its group and middleware.
 func (s *Server) routes() {
-	// JSON endpoints get a small body limit. The photo upload uses Root and sets its own.
+	h := s.wire()
+
+	// Shared middleware.
+	signedIn := middleware.Auth(s.tokens)
+	ready := middleware.RequirePasswordChanged() // rejects sessions still on a temporary password
+	hasProfile := middleware.RequireProfile()
+
+	loginPerMinute := s.cfg.LoginRateLimit
+	if loginPerMinute < 1 {
+		loginPerMinute = defaultLoginPerMinute // zero value (e.g. a Config built in tests)
+	}
+	loginLimiter := middleware.NewKeyedLimiter(loginPerMinute, time.Minute)
+	uploadLimiter := middleware.NewKeyedLimiter(uploadPerMinute, time.Minute)
+
+	// JSON endpoints get a small body limit. The photo upload sets its own below.
 	api := s.engine.Group("/api/v1", middleware.BodyLimit(jsonBodyLimit))
 	api.GET("/healthz", s.health)
 
-	signedIn := middleware.Auth(s.tokens)
-	ready := middleware.RequirePasswordChanged()
-	r := router.Groups{
-		Root:     &s.engine.RouterGroup,
-		API:      api,
-		Admin:    api.Group("/admin", signedIn, ready, middleware.RequireRole(shared.RoleAdmin)), // use cases check again
-		SignedIn: signedIn,
-		Ready:    ready,
-	}
-
-	auth := authapi.New(
-		authservice.New(authrepo.New(s.db), s.tokens),
-		authapi.CookieOptions{Secure: s.cfg.IsProduction()},
-	)
-	// Limits sign-in and password-change attempts (0 = default 5 per minute).
-	loginPerMinute := s.cfg.LoginRateLimit
-	if loginPerMinute < 1 {
-		loginPerMinute = 5 // zero value (e.g. a Config built in tests)
-	}
-	loginLimiter := middleware.NewKeyedLimiter(loginPerMinute, time.Minute)
-	// /auth/* only needs SignedIn, so a user on a temporary password can still
+	// /auth/* only needs signedIn, so a user on a temporary password can still
 	// see who they are and change it.
-	a := r.API.Group("/auth")
-	a.POST("/login", middleware.RateLimit(loginLimiter, middleware.ByIP), auth.Login)
-	a.POST("/logout", auth.Logout)
-	a.GET("/me", r.SignedIn, auth.Me)
-	a.POST("/change-password", r.SignedIn, middleware.RateLimit(loginLimiter, middleware.ByUser), auth.ChangePassword)
-	r.Admin.POST("/employees", auth.AdminCreateAccount)
-	r.Admin.POST("/employees/:id/reset-password", auth.AdminResetPassword)
+	auth := api.Group("/auth")
+	auth.POST("/login", middleware.RateLimit(loginLimiter, middleware.ByIP), h.auth.Login)
+	auth.POST("/logout", h.auth.Logout)
+	auth.GET("/me", signedIn, h.auth.Me)
+	auth.POST("/change-password", signedIn, middleware.RateLimit(loginLimiter, middleware.ByUser), h.auth.ChangePassword)
 
 	// /profile/* takes the employee id from the token; the URL has no id.
-	profile := profileapi.New(profileservice.New(profileservice.Deps{
-		Repo:   profilerepo.New(s.db),
-		Photos: imaging.NewProcessor(s.cfg.UploadMaxBytes),
-		Files:  s.files,
-		Log:    s.log,
-	}))
-	p := r.API.Group("/profile", r.SignedIn, r.Ready, middleware.RequireProfile())
-	p.GET("", profile.GetProfile)
-	p.PUT("/contact/:field", profile.UpdateContact)
-	p.PUT("/skills", profile.SetSkills)
 	// No route changes the name: F2 is enforced by the server, not only the UI.
+	profile := api.Group("/profile", signedIn, ready, hasProfile)
+	profile.GET("", h.profile.GetProfile)
+	profile.PUT("/contact/:field", h.profile.UpdateContact)
+	profile.PUT("/skills", h.profile.SetSkills)
+	profile.GET("/history", h.history.ListOwn)
 
 	// The upload has its own group: a body limit sized for the file, not for JSON.
-	uploadLimiter := middleware.NewKeyedLimiter(10, time.Minute)
-	upload := r.Root.Group("/api/v1/profile",
+	upload := s.engine.Group("/api/v1/profile",
 		middleware.BodyLimit(s.cfg.UploadMaxBytes+multipartOverhead),
-		r.SignedIn, r.Ready, middleware.RequireProfile(),
+		signedIn, ready, hasProfile,
 		middleware.RateLimit(uploadLimiter, middleware.ByUser))
-	upload.PUT("/photo", profile.UpdatePhoto)
-	r.Admin.PUT("/employees/:id/name", profile.AdminUpdateName)
+	upload.PUT("/photo", h.profile.UpdatePhoto)
 
-	file.NewHandler(s.files).RegisterRoutes(r)
+	signedInReady := api.Group("", signedIn, ready)
+	signedInReady.GET("/skills", h.skill.List)
+	signedInReady.GET("/files/photos/:name", h.file.Photo)
 
-	// Admin directory and dashboard (read-only; edits go through profile).
-	employees := employeeapi.New(employeeservice.New(employeerepo.New(s.db)))
-	r.Admin.GET("/stats", employees.Stats)
-	r.Admin.GET("/employees", employees.List)
-	r.Admin.GET("/employees/:id", employees.Get)
+	// Admin: the router checks the role and every service checks it again.
+	admin := api.Group("/admin", signedIn, ready, middleware.RequireRole(shared.RoleAdmin))
+	admin.GET("/stats", h.employee.Stats)
+	admin.GET("/employees", h.employee.List)
+	admin.POST("/employees", h.auth.AdminCreateAccount)
+	admin.GET("/employees/:id", h.employee.Get)
+	admin.PUT("/employees/:id/name", h.profile.AdminUpdateName)
+	admin.POST("/employees/:id/reset-password", h.auth.AdminResetPassword)
+	admin.GET("/employees/:id/history", h.history.AdminList)
 
-	// History is read-only; writes happen inside the profile transactions.
-	history := historyapi.New(historyservice.New(historyrepo.New(s.db), s.cfg.HistoryDays))
-	r.API.GET("/profile/history", r.SignedIn, r.Ready, middleware.RequireProfile(), history.ListOwn)
-	r.Admin.GET("/employees/:id/history", history.AdminList)
+	admin.GET("/skills", h.skill.AdminList)
+	admin.POST("/skills", h.skill.Create)
+	admin.PATCH("/skills/:id", h.skill.Update)
+	admin.PUT("/skills/order", h.skill.Reorder)
 
-	skills := skillapi.New(skillservice.New(skillrepo.New(s.db)))
-	r.API.GET("/skills", r.SignedIn, r.Ready, skills.List)
-	r.Admin.GET("/skills", skills.AdminList)
-	r.Admin.POST("/skills", skills.Create)
-	r.Admin.PATCH("/skills/:id", skills.Update)
-	r.Admin.PUT("/skills/order", skills.Reorder)
-
-	settings := settingapi.New(settingservice.New(settingrepo.New(s.db), s.cfg.HistoryDays))
-	r.Admin.GET("/settings", settings.Get)
-	r.Admin.PUT("/settings/history-days", settings.SetHistoryDays)
+	admin.GET("/settings", h.setting.Get)
+	admin.PUT("/settings/history-days", h.setting.SetHistoryDays)
 }
 
 func (s *Server) health(c *gin.Context) {
