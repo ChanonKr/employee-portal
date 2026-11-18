@@ -44,7 +44,7 @@
 ```
 ┌──────────────────────┐        HTTPS / JSON         ┌─────────────────────────────┐
 │  React SPA (Vite+TS) │ ──────────────────────────▶ │  Go API (Gin)               │
-│  TanStack Query      │ ◀────────────────────────── │  handler → service → repo   │
+│  TanStack Query      │ ◀────────────────────────── │  api → service → repo       │
 └──────────────────────┘   httpOnly JWT cookie       └──────┬───────────────┬──────┘
                                                              │ GORM (pgx)    │ write/read file
                                                              ▼               ▼
@@ -54,6 +54,7 @@
                                                     └────────────────┘ └──────────────┘
                  ทั้งหมดรันด้วย docker compose (postgres, migrate, api, web)
 ```
+- ใน API มี **retention job** (goroutine) ที่เชื่อม DB อีก connection ด้วย role `retention` — ลบ history เก่ากว่า `HISTORY_RETENTION_DAYS` และไฟล์รูปที่ไม่มีใครใช้ (§7.9)
 
 ### 2.1 Tech Stack
 | Layer | เลือกใช้ |
@@ -80,13 +81,14 @@ Backend ใช้ **Clean Architecture แบบ Package by Feature**: 1 feature
 ```
 employee-portal/
 ├── backend/
-│   ├── app/main.go                     # config → slog → pgxpool → server.Run (graceful shutdown)
+│   ├── app/main.go                     # config → slog → database.Open (GORM) → server.New → retention job (goroutine, DB role retention) → server.Run (graceful shutdown)
 │   ├── configs/config.go               # env → struct (JWT_SECRET required, ≥ 32 chars)
 │   ├── modules/
 │   │   ├── server/
 │   │   │   ├── server.go               # gin.Engine, global middleware, Run/Shutdown
 │   │   │   ├── wire.go                 # composition root: ประกอบ repo → service → api ของทุก feature
-│   │   │   └── routes.go               # route table เดียวของทั้งระบบ: group + middleware + handler ทุก endpoint
+│   │   │   ├── routes.go               # route table เดียวของทั้งระบบ: group + middleware + handler ทุก endpoint
+│   │   │   └── retention.go            # RunRetention: รัน history retention ตอน start และทุก RETENTION_INTERVAL
 │   │   ├── shared/                     # domain kernel: Actor, Role, RequireAdmin, errors (ErrNotFound, ErrConflict, …, ValidationError), PageRequest
 │   │   ├── auth/                       # ทุก feature มีโครงเดียวกัน:
 │   │   │   ├── domain/                 #   กฎธุรกิจ + type (ไม่มี tag, ไม่ import gin/gorm) + *_test.go
@@ -96,7 +98,7 @@ employee-portal/
 │   │   │   └── api/                    #   api.go (Gin handler) · dto.go (request/response) · interface.go (Service ที่ api เรียก)
 │   │   ├── profile/                    # Employee, ContactField, ChangeContact/Skills/Photo/Name (รวม PUT /profile/skills)
 │   │   ├── skill/                      # catalog สำหรับ picker + Admin → Skills
-│   │   ├── history/                    # FieldName, Change, ChangeLog · GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile)
+│   │   ├── history/                    # FieldName, Change, ChangeLog, retention rules · GET /profile/history (อ่านอย่างเดียว — การเขียน log อยู่ใน transaction ของ profile) · retention job (service.Retention + repo.RetentionRepository)
 │   │   ├── setting/                    # Admin → Settings (history days)
 │   │   ├── employee/                   # Admin → Employees (list, search, detail) + Dashboard stats
 │   │   └── file/api/                   # GET /files/photos/:name (api อย่างเดียว — stream ไฟล์)
@@ -105,29 +107,29 @@ employee-portal/
 │   │   │   ├── postgres.go             # Open (*gorm.DB) + Ping + Close
 │   │   │   ├── tx.go                   # WithTx(ctx, db, fn(*gorm.DB))
 │   │   │   ├── errors.go               # gorm / pg error → shared error
-│   │   │   ├── migrations/             # golang-migrate: init, grants, seed_demo
+│   │   │   ├── migrations/             # golang-migrate: 000001 init, 000002 grants, 000003 seed_demo, 000004 retention_role
 │   │   ├── middleware/                 # requestid, logger, recover, auth, rbac, ratelimit, headers, timeout
 │   │   ├── httputil/                   # error envelope (WriteError), ETag / If-Match
 │   │   ├── security/                   # jwt.go, password.go (bcrypt)
 │   │   ├── storage/                    # Local: ชื่อ UUID, เขียน temp → rename, Open/Delete ตรวจชื่อ
 │   │   ├── imaging/                    # ตรวจ magic bytes, resize ≤ 512, re-encode JPEG
-│   ├── db-init/01_roles.sql            # สร้าง role app (LOGIN) ตอน postgres init ครั้งแรก — local dev
+│   ├── db-init/                        # ตอน postgres init ครั้งแรก (local dev): 01_roles.sql สร้าง role app, 02_retention_role.sql สร้าง role retention (LOGIN)
 │   ├── tests/integration/              # testcontainers Postgres 17 (build tag: integration)
 │   ├── Dockerfile                      # distroless, nonroot
 │   └── go.mod
 ├── frontend/
 │   ├── src/
 │   │   ├── api/                        # fetch client + types
-│   │   ├── features/auth/
-│   │   ├── features/profile/           # ProfileHeader, ProfileChecklist, ContactField, SkillsPicker, RecentChangesCard
-│   │   ├── features/history/           # HistoryTimeline
-│   │   ├── features/admin/             # AdminShell, Skills, Settings, Employees, Dashboard
-│   │   ├── components/ui/
-│   │   └── lib/
+│   │   ├── features/auth/              # LoginPage, ChangePasswordPage, guards
+│   │   ├── features/profile/           # ProfileHeader, ProfileChecklist, ContactCard (+ contactRules), SkillsCard, RecentChangesCard
+│   │   ├── features/history/           # HistoryPage, HistoryTimeline, HistoryEntry, PhotoChange
+│   │   ├── features/admin/             # AdminLayout, Dashboard, Employees, EmployeeDetail, SkillsAdmin, Settings
+│   │   ├── components/ui/              # Radix + Tailwind: dialog (ResponsiveDialog), photo-viewer (PhotoViewer), avatar, …
+│   │   └── lib/                        # format (formatPhone, timeAgo), useMediaQuery, …
 │   └── Dockerfile
 ├── docs/                               # DESIGN.md, screenshots
 ├── docker-compose.yml
-├── Makefile                            # up, down, migrate, test, e2e, vet
+├── Makefile                            # up, down, reset, migrate-up, run, test, test-integration, test-web, e2e, vet
 ├── .env.example
 ├── .github/workflows/ci.yml
 ├── LICENSE
@@ -162,7 +164,7 @@ CREATE TABLE employees (
   user_id        BIGINT      NOT NULL UNIQUE REFERENCES users(id),
   first_name     TEXT        NOT NULL CHECK (length(first_name) BETWEEN 1 AND 100),
   last_name      TEXT        NOT NULL CHECK (length(last_name)  BETWEEN 1 AND 100),
-  photo_path     TEXT,
+  photo_path     TEXT,                                                 -- ชื่อไฟล์รูปปัจจุบัน (<uuid>.jpg)
   mobile_phone   TEXT        CHECK (mobile_phone  ~ '^\+?[0-9]{9,15}$'),  -- ด่านสำรอง; แอปบังคับ 10 หลัก (§6.3)
   contact_email  TEXT        CHECK (length(contact_email) <= 254),
   address        TEXT        CHECK (length(address) BETWEEN 1 AND 500),
@@ -223,11 +225,12 @@ CREATE INDEX idx_log_emp_time ON profile_change_logs (employee_id, changed_at DE
 | `SaveContact` / `SavePhoto` / `SaveName` / `BumpVersion` | `Where("id = ? AND version = ?").Updates(map)` + `version = version + 1` · `RowsAffected == 0` → `ErrConflict` | F3, F4, F5, แก้ชื่อ |
 | `GetSkillsByIDs` | `Where("id IN ?", ids)` | F5 — คืนทั้ง active/inactive เพื่อแยก "ไม่มีจริง" กับ "ถูกปิด" |
 | `ReplaceSkills` | `Delete` + `Create(&[]EmployeeSkill{...})` (batch insert) | F5 |
-| `AppendChange` | `Create(&ProfileChangeLog{})` (JSONB เป็น `[]byte`, nil = NULL) | ทุกการแก้ไข |
+| `AppendChange` | `Create(&model.ChangeLog{})` (JSONB เป็น `[]byte`, nil = NULL) | ทุกการแก้ไข |
 | `List` (history) / `HasOlder` | `Where` ต่อกันตาม filter ที่มี · `SELECT EXISTS (subquery)` | F6 |
 | `Set` (settings) | `Clauses(clause.OnConflict{...}).Create` (upsert) | Admin |
 | `Reorder` (skills) | `Update` ทีละแถวใน `WithTx` · id ไม่มีจริง → rollback ทั้งชุด | Admin |
 | `Stats` | `Select` + `count(*) FILTER (...)`, `Group`, `Joins` | Dashboard |
+| `Purge` (retention) | `Raw` SQL ใน `WithTx`: `pg_try_advisory_xact_lock` → `DELETE … RETURNING` (window function `row_number()` เก็บ photo change 3 อันล่าสุดต่อพนักงาน) → หาไฟล์ที่ยังถูกใช้ | retention job (§7.9) |
 
 ### 5.3 ตัวอย่าง
 ```go
@@ -253,7 +256,7 @@ func (t *txRepository) SaveContact(ctx context.Context, e domain.Employee, f dom
 }
 
 // modules/history/repo/repo.go — เงื่อนไขต่อกันตามที่มี (days 0 = admin ไม่จำกัดช่วง)
-db := r.db.WithContext(ctx).Model(&model.ProfileChangeLog{}).
+db := r.db.WithContext(ctx).Table(model.ChangeLogTable).
     Joins("JOIN users ON users.id = profile_change_logs.changed_by").
     Where("profile_change_logs.employee_id = ?", q.EmployeeID)
 if q.Days > 0 {
@@ -339,7 +342,7 @@ func (svc *Service) UpdateContact(ctx context.Context, in UpdateContactInput) (i
 | PUT | `/profile/photo` | ✔ | multipart `file` + `If-Match` | `{version, photoUrl}` |
 | GET | `/skills` | ✔ | – | `[{id, name}]` |
 | PUT | `/profile/skills` | ✔ | `{skillIds: number[]}` + `If-Match` | `{version}` |
-| GET | `/profile/history` | ✔ | `?field=&page=&pageSize=` · `field` = ชื่อเดียวกับ `items[].field` (`mobile_phone`, `contact_email`, `address`, `photo`, `skills`, `first_name`, `last_name`) · `pageSize` 1–100 (default 20) | `{days, hasOlder, items: [...], page}` |
+| GET | `/profile/history` | ✔ | `?field=&page=&pageSize=` · `field` = ชื่อเดียวกับ `items[].field` (`mobile_phone`, `contact_email`, `address`, `photo`, `skills`, `first_name`, `last_name`) · `pageSize` 1–100 (default 20) | `{days, hasOlder, items: [...], page}` · `days` = ช่วงที่แสดง (admin setting ≤ retention) · photo: `oldValue`/`newValue` เป็น URL ของรูป |
 | GET | `/files/photos/:name` | ✔ | – | image |
 | GET | `/healthz` | – | – | `{status, db}` |
 
@@ -353,14 +356,14 @@ func (svc *Service) UpdateContact(ctx context.Context, in UpdateContactInput) (i
 | PUT | `/admin/skills/order` | `[{id, sortOrder}]` | 204 · id ไม่รู้จักแม้ตัวเดียว → 404 และไม่มีอะไรเปลี่ยน (transaction) |
 | GET | `/admin/settings` | – | `{historyDays, maxHistoryDays, updatedBy: {id, employeeCode} \| null, updatedAt \| null}` · `maxHistoryDays` = `HISTORY_RETENTION_DAYS` |
 | PUT | `/admin/settings/history-days` | `{value}` (จำนวนเต็ม 1 ถึง `maxHistoryDays`) | 204 · มีผลกับ `/profile/history` ทันที |
-
-module: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · รายชื่อ/รายละเอียด/stats อยู่ใน `employee/` · history ของ admin อยู่ใน `history/` · แก้ชื่ออยู่ใน `profile/` (ใช้ lock + version + log เดียวกับการแก้โปรไฟล์) · ทุก admin service method เรียก `shared.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
 | GET | `/admin/employees` | `?q=&page=&pageSize=` · `q` ค้นรหัสพนักงานหรือ "ชื่อ นามสกุล" (ไม่สนตัวพิมพ์, `%` `_` ที่พิมพ์มาเป็นตัวอักษรธรรมดา) | `{items: [{id, employeeCode, firstName, lastName, photoUrl, role, isActive}], page: {page, pageSize, hasNext}, total}` |
 | GET | `/admin/employees/:id` | – | `Profile` + `role`, `isActive`, skills มี `isActive` · `ETag` สำหรับแก้ชื่อ |
-| GET | `/admin/employees/:id/history` | `?field=&page=&pageSize=` | รูปเดียวกับ `/profile/history` แต่ `days: null` = ทั้งหมด (ไม่จำกัดช่วงเวลา) · 404 ถ้าไม่มีพนักงาน |
+| GET | `/admin/employees/:id/history` | `?field=&page=&pageSize=` | รูปเดียวกับ `/profile/history` แต่ `days: null` = ไม่จำกัดช่วงที่แสดง → ทุกอย่างที่ยังเก็บอยู่ (`HISTORY_RETENTION_DAYS` + รูปเก่า 3 รูป) · 404 ถ้าไม่มีพนักงาน |
 | PUT | `/admin/employees/:id/name` | `{firstName, lastName}` (trim, 1–100) + `If-Match` | `{version}` · log `first_name` / `last_name` แยกแถว, `changed_by` = admin |
 | POST | `/admin/employees` | `{employeeCode, firstName, lastName, role?}` | 201 `{id, employeeCode, temporaryPassword}` · สร้าง user + employee ใน transaction เดียว · รหัสชั่วคราวแสดงครั้งเดียว · 409 ถ้ารหัสพนักงานซ้ำ |
 | POST | `/admin/employees/:id/reset-password` | – | `{temporaryPassword}` · บังคับเปลี่ยนรหัสตอน login ครั้งถัดไป |
+
+แบ่งตาม feature: จัดการ skill อยู่ใน `skill/` (เจ้าของ catalog) · ตั้งค่าอยู่ใน `setting/` · รายชื่อ/รายละเอียด/stats อยู่ใน `employee/` · สร้างบัญชี/reset รหัสอยู่ใน `auth/` · history ของ admin อยู่ใน `history/` · แก้ชื่ออยู่ใน `profile/` (ใช้ lock + version + log เดียวกับการแก้โปรไฟล์) · ทุก admin service method เรียก `shared.RequireAdmin(actor)` ซ้ำหลัง `RequireRole` ใน router
 
 ### 6.1 ตัวอย่าง Response
 ```json
@@ -383,7 +386,9 @@ module: จัดการ skill อยู่ใน `skill/` (เจ้าขอ
     { "id": 31, "field": "skills", "oldValue": ["Go","React"], "newValue": ["Go","Flutter"],
       "changedAt": "2026-11-16T09:12:03.120Z", "changedBy": { "id": 5, "role": "employee" } },
     { "id": 30, "field": "mobile_phone", "oldValue": "0811111111", "newValue": "0812345678",
-      "changedAt": "2026-11-15T14:01:44.002Z", "changedBy": { "id": 5, "role": "employee" } }
+      "changedAt": "2026-11-15T14:01:44.002Z", "changedBy": { "id": 5, "role": "employee" } },
+    { "id": 29, "field": "photo", "oldValue": "/api/v1/files/photos/1b7e...jpg", "newValue": "/api/v1/files/photos/9f2c...jpg",
+      "changedAt": "2026-11-14T08:30:10.551Z", "changedBy": { "id": 5, "role": "employee" } }
   ],
   "page": { "page": 1, "pageSize": 20, "hasNext": false }
 }
@@ -417,7 +422,7 @@ module: จัดการ skill อยู่ใน `skill/` (เจ้าขอ
 | email | trim, lowercase, `net/mail` ต้องเป็น address เปล่า (ไม่รับ `Name <a@b>`) + pattern: ก่อน `@` เป็น a-z 0-9 `. _ % + -` (ไม่ขึ้นต้น/ลงท้าย/ซ้อนด้วย `.`), domain เป็น label คั่นด้วย `.` และลงท้ายด้วย TLD ตัวอักษร ≥ 2 ตัว (ไม่รับ `a@b`, `a@b.c`, `a..b@x.com`) · ≤ 254 · หน้าเว็บใช้ pattern เดียวกัน |
 | address | trim, 1–500 ตัวอักษร (นับเป็น rune — ภาษาไทยนับถูก) |
 | contact ทุก field | กรอกค่าได้แต่ล้างเป็นค่าว่างไม่ได้ (ตั้งใจ — ลดความกำกวมของ "ลบ" กับ "ไม่ส่ง") |
-| photo | ≤ 5 MB, magic bytes = jpeg/png/webp, decode ได้, resize ≤ 512×512 → JPEG q85 |
+| photo | ≤ 5 MB, magic bytes = jpeg/png/webp, decode ได้, resize ≤ 512×512 → JPEG q85 · ตรวจชนิด/ขนาดฝั่ง client ก่อนด้วย |
 | skillIds | ต้องส่ง (`[]` = ล้างทั้งหมด), ไม่ซ้ำ, ≤ 20 รายการ, ทุก id ต้องมีอยู่ และต้อง active **ยกเว้น**ตัวที่พนักงานมีอยู่แล้ว (ตรวจกับ DB) |
 
 DB มี `CHECK` constraint เป็นชั้นที่สอง กันข้อมูลเสียจากทุกช่องทาง
@@ -472,13 +477,29 @@ type TokenIssuer interface {
     Issue(a shared.Actor) (token string, expiresAt time.Time, err error)
 }
 
-// pkg/storage (ขั้นถัดไป)
+// modules/profile/service/interface.go — pkg/imaging และ pkg/storage implement
+type PhotoProcessor interface {
+    Normalize(r io.Reader) (jpeg []byte, err error)
+}
 type FileStorage interface {
-    Save(ctx context.Context, r io.Reader, ext string) (path string, err error)
-    Delete(ctx context.Context, path string) error
-    Open(ctx context.Context, path string) (io.ReadCloser, error)
+    Save(ctx context.Context, data []byte, ext string) (name string, err error)
+    Delete(ctx context.Context, name string) error
+}
+
+// modules/file/api/api.go — stream รูป
+type Reader interface {
+    Open(ctx context.Context, name string) (io.ReadSeekCloser, time.Time, error)
+}
+
+// modules/history/service/retention.go — retention job
+type RetentionRepository interface {
+    Purge(ctx context.Context, cutoff time.Time, keepPhotos int) (domain.PurgeResult, error)
+}
+type FileDeleter interface {
+    Delete(ctx context.Context, name string) error
 }
 ```
+- `storage.Local` ตัวเดียว implement ทั้ง `FileStorage`, `Reader` และ `FileDeleter` — interface เล็กตามที่แต่ละ feature ต้องใช้
 
 ### 7.3 Contact: endpoint เดียว + กฎอยู่ใน domain
 ```go
@@ -507,7 +528,7 @@ func WithTx(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error 
     return db.WithContext(ctx).Transaction(fn)   // commit ถ้า nil, rollback ถ้า error หรือ panic
 }
 ```
-Repository ของแต่ละ module ห่อ `WithTx` เป็น `WithTx(ctx, fn func(TxRepository) error)` เพื่อไม่ให้ `*gorm.DB` หลุดออกไปถึง use case
+Repository ของแต่ละ feature ห่อ `WithTx` เป็น `WithTx(ctx, fn func(TxRepository) error)` เพื่อไม่ให้ `*gorm.DB` หลุดออกไปถึง service
 
 ### 7.5 Flow อัปโหลดรูป (ไฟล์ + DB ให้สอดคล้องกัน)
 ```
@@ -529,12 +550,13 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
 - Login: `GetUserByCode` → ตรวจ `is_active` → `bcrypt.CompareHashAndPassword` → ออก JWT (HS256, `sub=user_id`, `emp=employee_id`, `role`, exp 8 ชม.)
 - Error ของ login ไม่บอกว่าผิดที่รหัสพนักงานหรือรหัสผ่าน (กัน user enumeration)
 - เก็บใน cookie `HttpOnly; Secure (prod); SameSite=Strict; Path=/api`
-- Middleware ใส่ `Actor{UserID, EmployeeID, Role}` ลง `gin.Context` → handler ใช้ `/profile/*` ผู้ใช้จึงแก้ได้เฉพาะโปรไฟล์ตัวเอง
-- RBAC 3 ชั้น: (1) FE ซ่อนเมนู + route guard → (2) Gin `RequireRole("admin")` → (3) `AdminService` ตรวจ `actor.Role` ซ้ำ (ชั้น 2–3 คือชั้นที่เชื่อถือได้)
+- Middleware ใส่ `shared.Actor{UserID, EmployeeID, Role, MustChangePassword}` ลง `gin.Context` → api ส่งต่อให้ service · `/profile/*` ใช้ employee id จาก token ผู้ใช้จึงแก้ได้เฉพาะโปรไฟล์ตัวเอง
+- RBAC 3 ชั้น: (1) FE ซ่อนเมนู + route guard → (2) Gin `RequireRole(shared.RoleAdmin)` → (3) service ทุกตัวที่เป็นงาน admin เรียก `shared.RequireAdmin(actor)` ซ้ำ (ชั้น 2–3 คือชั้นที่เชื่อถือได้)
   ```go
-  api := r.Group("/api/v1")
-  profile := api.Group("/profile", mw.Auth())   // employee id มาจาก JWT เสมอ — URL ไม่มี id
-  admin := api.Group("/admin", mw.Auth(), mw.RequireRole("admin"))
+  // modules/server/routes.go — route table เดียวของทั้งระบบ
+  api := s.engine.Group("/api/v1", middleware.BodyLimit(jsonBodyLimit))
+  profile := api.Group("/profile", signedIn, ready, hasProfile)   // employee id มาจาก JWT เสมอ — URL ไม่มี id
+  admin := api.Group("/admin", signedIn, ready, middleware.RequireRole(shared.RoleAdmin))
   ```
 - Rate limit `/auth/login` 5 req/นาที/IP (ปรับได้ด้วย `LOGIN_RATE_LIMIT` — E2E ตั้งสูงเพราะทุก test login จาก IP เดียว), `/auth/change-password` 5 req/นาที/user, upload 10 req/นาที/user
 - CORS: request ที่ `Origin` ตรงกับ `Host` (same-origin ผ่าน nginx / Vite proxy) ข้าม allowlist — browser ส่ง `Origin` แม้เป็น same-origin POST · cross-origin ยังต้องอยู่ใน `CORS_ORIGINS` · nginx / Vite ส่ง `Host` เดิม (มี port) ต่อให้ API
@@ -558,6 +580,7 @@ Repository ของแต่ละ module ห่อ `WithTx` เป็น `With
 | `UPLOAD_MAX_BYTES` | `5242880` | |
 | `CORS_ORIGINS` | `http://localhost:5173` | |
 | `TRUSTED_PROXIES` | (ว่าง) | IP ของ reverse proxy (เช่น web container) เพื่อให้ rate limit ใช้ IP จริงของผู้ใช้ |
+| `LOGIN_RATE_LIMIT` | `5` | จำนวนครั้ง login ต่อนาทีต่อ IP (และเปลี่ยนรหัสต่อนาทีต่อ user) · `make e2e` ตั้งเป็น 1000 ชั่วคราว |
 
 Migration ใช้ role `owner` ผ่าน `docker-compose.yml` / `Makefile` (ไม่อยู่ใน config ของ API)
 
@@ -586,7 +609,8 @@ commit → ลบไฟล์ที่ไม่มีใครใช้ (best-ef
 ```
 - เก็บรูป = รูปปัจจุบัน + ทุกรูปที่อัปโหลดในช่วง retention + อีก 3 รูปก่อนหน้านั้น · `old_value` ของ change ที่เก่าที่สุดที่เหลืออาจชี้ไฟล์ที่ลบแล้ว → UI แสดง placeholder
 - API ยัง serve ได้แม้ retention DB เชื่อมไม่ได้ (log error) — เป็นงาน housekeeping
-- ทดสอบ: unit test ของ service (fake repo) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role)
+- ทดสอบ: unit test ของ service (fake repo) + integration test กับ Postgres จริง (กฎ 3 รูป, ไฟล์ที่ลบ, lock, สิทธิ์ role) · ทดสอบกับ stack จริงด้วยการ backdate ข้อมูล: รูป 7 รูป (200/150/120/100/95/30/10 วัน) → ลบ 2 รูปแรก เก็บ 5 ตรงตามกฎ
+- log ทุกรอบ: `retention: purged retentionDays=… deletedChanges=… deletedPhotos=…`
 
 ---
 
@@ -677,7 +701,7 @@ export default defineConfig({
 ```
 ┌──────────────┬────────────────────────────────────────┐
 │ [Photo 📷]    │ Contact                                │
-│ Somchai J. 🔒 │  Mobile   081 234 5678       [✎ Edit] │  ← ContactField × 3
+│ Somchai J. 🔒 │  Mobile   081 234 5678       [✎ Edit] │  ← ContactCard: 3 แถว
 │ EMP-00123    │  Email    [input........] [Cancel][Save]│     (edit/save/cancel แยกกัน)
 │              │  Address  99 Sukhumvit...    [✎ Edit] │
 │ Skills       ├────────────────────────────────────────┤
@@ -687,6 +711,10 @@ export default defineConfig({
 └──────────────┴────────────────────────────────────────┘
 ```
 **Mobile (< 768px)** — คอลัมน์เดียว: Photo + ชื่อ → Contact (แต่ละแถวกดแล้วเปิด **bottom Drawer**) → Skills → Recent changes
+
+- **Mobile:** ช่องกรอกรับเฉพาะตัวเลข (`inputMode="numeric"`) ตัวอื่นถูกตัดทิ้งขณะพิมพ์/วาง ได้สูงสุด 10 หลักติดกัน (`0812345678`) — ไม่ใช้ `maxLength` เพราะจะตัดค่าที่วางมา (`081-234-5678`) ก่อนลบ `-` · แสดงผลเป็น `081 234 5678` (`formatPhone`) ทุกที่ (Contact, History, admin)
+- **Email:** ตรวจรูปแบบด้วย pattern เดียวกับ server ก่อนส่ง (§6.3)
+- **รูปโปรไฟล์:** กดรูปเพื่อดูใหญ่ใน popup (`PhotoViewer`) · ปุ่มกล้องมุมรูปใช้เปลี่ยนรูป
 
 **First-time / empty state** (ไม่มีหน้า onboarding แยก — ผู้ใช้เข้าใช้งานได้ทันที)
 - Banner "Welcome, {firstName}" + progress bar + checklist 4 ข้อ: Name ✓, Photo, Contact info, Skills — คำนวณฝั่ง FE จากข้อมูลโปรไฟล์ · ครบ 4/4 แล้ว banner หายเอง
@@ -704,6 +732,7 @@ export default defineConfig({
 - Filter chips: All · Photo · Mobile · Email · Address · Skills
 - Timeline จัดกลุ่มตามวัน (Today / Yesterday / วันที่) · แต่ละรายการ: ไอคอน field, `ค่าเดิม` (ขีดฆ่า) → ค่าใหม่, เวลา, ผู้แก้ (ไอคอนคน = ตัวเอง, ไอคอนโล่ = admin)
 - Skills แสดงเป็น diff สี: `+CI/CD` (เขียว) `−Flutter` (แดง)
+- Photo แสดงรูปเล็ก เก่า → ใหม่ (`PhotoChange`) · กดเพื่อเปิด popup รูปใหญ่ เลื่อนเก่า ↔ ใหม่ได้ · รูปที่ retention ลบไปแล้วเป็น placeholder "no longer kept" (กดไม่ได้)
 - Timeline แบบเดียวกันทุกขนาดจอ (การ์ดต่อวัน — อ่านง่ายกว่าตารางเมื่อค่าเป็น diff ของ skills) · chip filter เลื่อนแนวนอนบนมือถือ · โหลดเพิ่มด้วย "Load more" (`useInfiniteQuery`)
 - `HistoryTimeline` ใช้ร่วมกับหน้า admin (`/admin/employees/:id` แสดง "last 90 days" — API คืน `days: null` = ทุกอย่างที่ยังเก็บอยู่ และจำนวนวันมาจาก `maxHistoryDays` ใน `/admin/settings`)
 - Empty state ใช้ข้อความเดียวกับ §9.5
@@ -717,7 +746,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 | Skills | รายการ: ปุ่ม ↑↓ ทุกขนาดจอ (แทน drag — ใช้ keyboard/screen reader ได้, ส่งลำดับใหม่ทั้งชุดใน request เดียว), Name (แก้ inline ✓/✕), Used by, สวิตช์ Active, ค้นหา, ปุ่ม Add skill · หมายเหตุ "Inactive skills disappear from the picker, but employees who already have them keep them." |
 | Settings | Change history: input จำนวนวัน + ปุ่มลัด 7/14/30/90, hint "1–N days. Changes are kept for N days, then deleted." (N = `maxHistoryDays`), ปุ่มลัดที่เกิน N ถูกซ่อน, แสดงผู้แก้ล่าสุด, Save มีผลทันที |
 | Employees | ตารางค้นหาชื่อ/รหัส + pagination (มือถือเป็นการ์ด) |
-| Employee detail | ข้อมูลโปรไฟล์, ช่อง Legal name (badge "Admin only") + Save name, history ทั้งหมดของคนนั้น (ระบุผู้แก้) |
+| Employee detail | ข้อมูลโปรไฟล์ (กดรูปดูใหญ่ได้), ช่อง Legal name (badge "Admin only") + Save name, Reset password, history ทุกอย่างที่ยังเก็บของคนนั้น หัวข้อ "Change history · last {maxHistoryDays} days" (ระบุผู้แก้) |
 
 ### 9.8 Responsive Guidelines
 | Breakpoint | ความกว้าง | Layout |
@@ -731,23 +760,29 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 |---|---|---|
 | แก้ contact | inline edit | bottom Drawer (คีย์บอร์ดไม่บัง) |
 | เลือก skills | Popover + Command search | Drawer เต็มจอ + search |
-| อัปโหลดรูป | ปุ่ม (ไม่มี drag & drop) → แสดงตัวอย่างก่อน แล้วกด **Save photo** ถึงอัปโหลด (Cancel ทิ้งได้) | ปุ่ม (กล้อง/คลังรูป) `accept="image/*"` → ตัวอย่าง + Save photo เหมือนกัน |
-| History / ตาราง admin | ตาราง | การ์ด |
+| อัปโหลดรูป | ปุ่ม (ไม่มี drag & drop) → แสดงตัวอย่างก่อน แล้วกด **Save photo** ถึงอัปโหลด (Cancel ทิ้งได้) | ปุ่ม (กล้อง/คลังรูป) `accept="image/jpeg,image/png,image/webp"` → ตัวอย่าง + Save photo เหมือนกัน |
+| History | timeline การ์ดต่อวัน | timeline เดียวกัน, chip filter เลื่อนแนวนอน |
+| ตาราง admin (Employees) | ตาราง | การ์ด |
+| ดูรูปใหญ่ | popup, ลูกศรที่ขอบจอ | popup เต็มจอ, ลูกศรอยู่ใต้รูป (ไม่บังรูป) |
 
 - สลับ Dialog ↔ Drawer ด้วย hook `useMediaQuery('(min-width: 768px)')`
-- Touch target ≥ 44×44px · input font ≥ 16px (กัน iOS zoom) · `type="tel"` / `type="email"` + `autoComplete`
+- Touch target ≥ 44×44px · input font ≥ 16px (กัน iOS zoom) · mobile `type="tel"` + `inputMode="numeric"` (แป้นตัวเลข) · email `type="email"` · `autoComplete` ทุกช่อง
 - รูป `aspect-square object-cover` · ข้อความยาว `break-words` · ไม่มี horizontal scroll · `env(safe-area-inset-bottom)` สำหรับ Drawer
 
 ### 9.9 Components & State
 | Component | หน้าที่ |
 |---|---|
-| `AppShell` / `AdminShell` | navbar, sidebar/sheet, guard |
-| `ProfileHeader` | รูป + อัปโหลด (preview, ตรวจขนาด/ชนิดฝั่ง client), ชื่อ read-only + 🔒 tooltip |
+| `AppShell` / `AdminLayout` | navbar, admin sidebar / แถบเลื่อน |
+| `guards` | `RequireAuth`, `RequireRole`, redirect ไป `/change-password` |
+| `ProfileHeader` | รูป + อัปโหลด (preview, ตรวจขนาด/ชนิดฝั่ง client), กดรูปดูใหญ่, ชื่อ read-only + 🔒 |
 | `ProfileChecklist` | banner ความครบของโปรไฟล์ (first-time) |
-| `ContactField` | edit 1 field (inline / Drawer ตามขนาดจอ), Zod schema, ส่ง `If-Match` |
-| `SkillsPicker` | multi-select chips, เทียบกับค่าเดิมเพื่อเปิดปุ่ม Save |
+| `ContactCard` | 3 แถว contact · แก้ทีละ field (inline / Drawer ตามขนาดจอ), Zod schema จาก `contactRules.ts` (mobile 10 หลัก, email pattern), ส่ง `If-Match` |
+| `SkillsCard` | multi-select chips + picker (Popover / Drawer), เทียบกับค่าเดิมเพื่อเปิดปุ่ม Save |
 | `RecentChangesCard` | 3 รายการล่าสุด + "View all" + empty state |
-| `HistoryTimeline` | group ตามวัน, filter, diff skills, ผู้แก้ |
+| `HistoryTimeline` / `HistoryEntry` | group ตามวัน, filter, diff skills, ผู้แก้ · ใช้ทั้งหน้า History และหน้า admin |
+| `PhotoChange` | รูปเล็ก เก่า → ใหม่ใน history + placeholder เมื่อไฟล์ถูกลบ |
+| `PhotoViewer` / `ViewablePhoto` | popup รูปใหญ่ (Radix Dialog): ลูกศร / ←→ เมื่อมีหลายรูป, Esc / ปุ่มปิด / แตะนอกรูป |
+| `ResponsiveDialog` | dialog กลางจอ (≥ 768px) / bottom sheet (มือถือ) |
 | `EmptyState` | ไอคอน + หัวข้อ + คำอธิบาย (ใช้ซ้ำทุกหน้า) |
 
 - Server state ด้วย TanStack Query: `useMe`, `useProfile`, `useSkills`, `useHistory`, admin hooks · mutation → `invalidateQueries(['profile','history'])`
@@ -769,13 +804,13 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 
 | ด้าน | สิ่งที่ทำ |
 |---|---|
-| Security | JWT httpOnly cookie, bcrypt, rate limit, `MaxBytesReader`, magic-byte check, ไฟล์ตั้งชื่อด้วย UUID (กัน path traversal), CORS allowlist, secure headers, SQL ผ่าน GORM (parameterized ทั้งหมด, ชื่อ column จาก whitelist), DB role แยก owner/app |
-| Data integrity | update + log ใน transaction เดียว (service + `TxManager`), `SELECT ... FOR UPDATE` + optimistic locking (`version`), CHECK constraint, log append-only ระดับสิทธิ์ DB |
+| Security | JWT httpOnly cookie, bcrypt, rate limit, `MaxBytesReader`, magic-byte check, ไฟล์ตั้งชื่อด้วย UUID (กัน path traversal), CORS allowlist, secure headers, SQL ผ่าน GORM (parameterized ทั้งหมด, ชื่อ column จาก whitelist), DB role แยก owner / app / retention |
+| Data integrity | update + log ใน transaction เดียว (service + `WithTx`), `SELECT ... FOR UPDATE` + optimistic locking (`version`), CHECK constraint, log append-only ระดับสิทธิ์ DB · retention ลบ log + ไฟล์ใน transaction เดียว แล้วลบไฟล์หลัง commit |
 | Observability | slog JSON, request-id ใน log + error response, `/healthz` (ping DB) |
-| Reliability | graceful shutdown, `pgxpool` settings, timeout ต่อ request (context) |
-| Testing | Unit (service, mock repo, table-driven) · Integration (testcontainers Postgres + migrations — transaction, lock, rollback จริง) · FE (Vitest + RTL) · E2E (Playwright: login → แก้เบอร์ → เห็นใน Recent changes / history) รันหลาย viewport (iPhone 13, iPad, 1280px) |
-| CI | GitHub Actions: golangci-lint, go test, eslint, vitest, build docker images, gitleaks |
-| DevEx | `docker compose up` ครั้งเดียวรันได้ครบ, Makefile, `.env.example`, seed users, OpenAPI spec |
+| Reliability | graceful shutdown, connection pool ของ GORM (`SetMaxOpenConns(10)`, idle 5 นาที), timeout ต่อ request (context) · retention job ล้มไม่ทำให้ API ล้ม |
+| Testing | Unit (domain + service, fake repo, table-driven) · Integration (testcontainers Postgres + migrations — transaction, lock, rollback, retention, สิทธิ์ DB role จริง) · FE (Vitest + RTL) · E2E (Playwright: login → แก้เบอร์ → เห็นใน Recent changes / history, อัปโหลดรูป + popup, admin) รันหลาย viewport (iPhone 13, iPad, 1280px) |
+| CI | GitHub Actions: gofmt, go vet, go test (unit + integration ผ่าน testcontainers), typecheck, vitest, build + docker images ทั้ง api/web, E2E Playwright บน stack จริง, gitleaks |
+| DevEx | `docker compose up` ครั้งเดียวรันได้ครบ, Makefile, `.env.example`, seed users |
 
 ### 10.1 Test Cases สำคัญ
 - แก้ contact → version +1 และมี log 1 แถว
@@ -789,7 +824,7 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 - history: log อายุ 8 วันไม่แสดงเมื่อ `history_days=7` แต่แสดงเมื่อ `=10` และ `hasOlder` ถูกต้อง
 - history: ไม่เคยแก้ → `items: []`, `hasOlder: false` · แก้นานแล้ว → `items: []`, `hasOlder: true` · เห็นเฉพาะของตัวเอง
 - history: `app_settings` ไม่มีค่าหรือค่าเสีย → ใช้ 7 วัน (หน้าไม่พัง) · ค่าเกิน retention → ตัดเหลือ retention · `?field=` ที่ไม่รู้จัก / `page` ไม่ใช่ตัวเลข / `pageSize` > 100 → 400
-- employee เรียก `/admin/*` → 403 · เรียก `AdminService` ด้วย actor ที่ไม่ใช่ admin → `ErrForbidden`
+- employee เรียก `/admin/*` → 403 · เรียก service ของงาน admin ด้วย actor ที่ไม่ใช่ admin → `ErrForbidden`
 - admin แก้ชื่อ → log `first_name`/`last_name` ระบุ `changed_by` = admin
 - ปิด skill → ไม่อยู่ใน `/skills` แต่พนักงานที่มีอยู่แล้วยังเห็น · ชื่อ skill ซ้ำ (ไม่สนตัวพิมพ์) → 409
 - admin ตั้ง `history_days = 30` → `/profile/history` คืน `days: 30` ทันที (ไม่ restart) · ค่า 0 หรือเกิน retention → 400
@@ -798,7 +833,12 @@ Layout: sidebar (Dashboard, Employees, Skills, Settings) บน ≥ 1024px · �
 - E2E responsive: แก้ contact ผ่าน Drawer บนมือถือ, ไม่มี horizontal scroll ทุก breakpoint
 - พยายามแก้ชื่อ (ไม่มี route) → 404/405
 - อัปโหลดไฟล์ .txt เปลี่ยนนามสกุลเป็น .jpg → 415
-- DB error ระหว่าง update photo → ไฟล์ใหม่ถูกลบ
+- DB error ระหว่าง update photo → ไฟล์ใหม่ถูกลบ · อัปโหลดสำเร็จ → ไฟล์รูปเดิมยังอยู่ (ให้ history แสดง)
+- mobile: 10 หลักเท่านั้น (`+66…`, 9 / 11 หลัก → 400) · ช่องกรอกตัดตัวอักษร/ช่องว่าง/`-` ทิ้ง · แสดง `081 234 5678`
+- email: ไม่รับ `a@example`, `a@b.c`, `a..b@x.com`, มีช่องว่าง, มี `@` 2 ตัว · รับ `name+tag@mail.example.co.th`
+- history photo: API คืน URL · popup เปิด/ปิด/เลื่อนเก่า ↔ ใหม่ · ไฟล์หาย → placeholder
+- setting `history_days` > retention → 400 · `/admin/settings` คืน `maxHistoryDays`
+- retention: ลบ log เก่ากว่า retention ยกเว้น photo change 3 อันล่าสุดต่อพนักงาน · ลบเฉพาะไฟล์ที่ไม่มี change ที่เหลือหรือโปรไฟล์ใช้ · instance อื่นถือ lock → ข้าม · role `retention` UPDATE log / DELETE employees ไม่ได้
 
 ---
 
@@ -811,7 +851,7 @@ services:
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U owner -d portal"], interval: 5s }
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ./backend/db-init:/docker-entrypoint-initdb.d:ro   # สร้าง role app
+      - ./backend/db-init:/docker-entrypoint-initdb.d:ro   # สร้าง role app + retention (LOGIN)
   migrate:
     image: migrate/migrate:v4.19.1
     depends_on: { postgres: { condition: service_healthy } }
@@ -820,15 +860,25 @@ services:
   api:
     build: ./backend
     env_file: .env
-    environment: { DATABASE_URL: "postgres://app:app@postgres:5432/portal?sslmode=disable" }
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/portal?sslmode=disable
+      RETENTION_DATABASE_URL: postgres://retention:retention@postgres:5432/portal?sslmode=disable
+      TRUSTED_PROXIES: 172.16.0.0/12               # ให้ rate limit เห็น IP จริงหลัง nginx
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-5}
     depends_on: { migrate: { condition: service_completed_successfully } }
     volumes: [uploads:/data/uploads]
     ports: ["8080:8080"]
-  # web: (ขั้น frontend)
+  web:
+    build: ./frontend                               # nginx: เสิร์ฟ SPA + proxy /api → api
+    depends_on: [api]
+    ports: ["5173:80"]
 volumes: { pg-data: {}, uploads: {} }
 ```
 `make up` สร้าง `.env` (สุ่ม `JWT_SECRET`) ถ้ายังไม่มี แล้วรัน `docker compose up -d --build`
 รหัสผ่านใน compose เป็นค่าสำหรับ local dev เท่านั้น (ดู §14)
+
+DB volume ที่สร้างก่อนมี `db-init/02_retention_role.sql` (role `retention` ถูกสร้างแบบ NOLOGIN โดย migration) → เปิด login ครั้งเดียว:
+`docker compose exec postgres psql -U owner -d portal -c "ALTER ROLE retention LOGIN PASSWORD 'retention'"` แล้ว `docker compose restart api` (หรือ `make reset` ถ้าลบข้อมูลได้)
 
 ---
 
@@ -836,7 +886,7 @@ volumes: { pg-data: {}, uploads: {} }
 
 | การตัดสินใจ | เหตุผล | สิ่งที่แลก |
 |---|---|---|
-| PostgreSQL + logic ใน Go service (ไม่ใช้ Stored Procedure) | ตรงทิศทางทีม (ย้ายจาก MySQL SP), test/debug ใน Go ง่าย, logic อยู่ที่เดียวกับโค้ด, ไม่ผูกกับ DB | ต้องจัดการ transaction เองใน service → `TxManager` + integration test |
+| PostgreSQL + logic ใน Go service (ไม่ใช้ Stored Procedure) | ตรงทิศทางทีม (ย้ายจาก MySQL SP), test/debug ใน Go ง่าย, logic อยู่ที่เดียวกับโค้ด, ไม่ผูกกับ DB | ต้องจัดการ transaction เองใน service → `WithTx` + integration test |
 | Gin (ไม่ใช่ Fiber) | อยู่บน `net/http` มาตรฐาน: ใช้ `httptest` และ middleware ของ ecosystem ได้, ส่ง `context.Context` ลง pgx ตรง ๆ, ไม่มี pitfall เรื่อง buffer reuse ของ fasthttp | benchmark ช้ากว่า Fiber — ไม่มีผลเพราะคอขวดอยู่ที่ DB และการ resize รูป |
 | GORM (ORM) แทน sqlc | เขียน query ใน Go ได้เลยไม่ต้อง generate, dynamic filter (history, ค้นหาพนักงาน) ต่อ `Where` ได้ตรง ๆ, upsert/locking มี clause ให้, ทีมส่วนใหญ่คุ้นเคย | พฤติกรรมแฝงต้องระวัง: `Updates(struct)` ข้าม zero value (→ ใช้ map), insert เขียน `false`/`0` ทับ DB default (→ tag `default`), query ผิดเจอตอนรันไม่ใช่ตอน build (→ integration test ครอบทุก repository) · ไม่ใช้ AutoMigrate · GORM อยู่แค่ใน `repo`/`model` (เดิมใช้ sqlc แล้วเปลี่ยนได้โดยไม่แตะ service/domain/test ของ service) |
 | Clean Architecture แบบ Package by Feature (1 feature = โฟลเดอร์เดียว, 1 layer = 1 package: `domain` `model` `repo` `service` `api`) | แก้/เพิ่ม/ลบฟีเจอร์อยู่ใน folder เดียว, คอมไพเลอร์บังคับทิศ dependency ระหว่าง layer, กฎธุรกิจอยู่ใน `domain` ทดสอบได้โดยไม่มี DB, route ทั้งหมดอ่านได้ที่ `server/routes.go` ที่เดียว | ชื่อ package ซ้ำกันข้าม feature (`domain`, `service`) → ต้อง alias ตอน import หลาย feature · `domain` ของ feature อ้างกันได้ (profile → skill, history) · feature ใช้ตารางร่วมกัน (ไม่ใช่ modular monolith เต็มรูป) เพราะ update + log ต้องอยู่ transaction เดียว |
@@ -852,6 +902,9 @@ volumes: { pg-data: {}, uploads: {} }
 | RBAC ตรวจทั้ง middleware และ service | defense in depth — ถ้าลืมใส่ middleware ที่ route ใหม่ service ยังกันอยู่ | ตรวจซ้ำ 2 ที่ |
 | Soft disable skill แทนการลบ | ข้อมูลเก่าของพนักงานไม่พัง, history ยังอ่านได้ | ตารางมี row ที่ไม่ใช้สะสม |
 | เก็บรูปบน local volume | ง่าย, demo ได้ทันที | scale หลายเครื่องไม่ได้ → `FileStorage` interface พร้อมเปลี่ยนเป็น S3/MinIO |
+| เก็บรูปเก่าไว้ (ไม่ลบตอนเปลี่ยนรูป) + เก็บเกิน retention อีก 3 รูป | history ดูรูปเก่า ↔ ใหม่ได้จริง, ย้อนดูรูปก่อนหน้าได้แม้เกินช่วง | ใช้พื้นที่มากขึ้น (จำกัดด้วย retention) · `old_value` ของ change ที่เก่าที่สุดที่เหลืออาจชี้ไฟล์ที่ลบแล้ว → placeholder |
+| retention job อยู่ใน process ของ API (ticker) ไม่ใช่ cron แยก | deploy ง่าย ไม่มี service เพิ่ม, ใช้ storage เดียวกับ API | ต้องกันหลาย instance ทำพร้อมกัน → advisory lock · ต้องมี DB connection ที่สอง (role `retention`) |
+| mobile 10 หลักที่แอป แต่ CHECK ใน DB ยัง 9–15 หลัก | กฎใหม่ไม่ทำให้แถวเก่า (`+66…`) แก้ช่องอื่นไม่ได้ | กฎ 2 ชั้นไม่เท่ากัน — แอปเป็นตัวบังคับจริง, DB เป็นด่านสำรอง |
 | ไม่มีหน้า onboarding แยก — ใช้ empty state + checklist | เข้าใช้งานได้ทันที, ไม่บังคับ wizard, โค้ดน้อยกว่า | ผู้ใช้อาจไม่กรอกครบ (checklist ช่วยกระตุ้น) |
 | History: การ์ดสรุปในหน้า Profile + หน้าเต็มผ่าน "View all" (ไม่มีเมนูบน navbar) | navigation เรียบ, history เป็นส่วนหนึ่งของโปรไฟล์, เห็นผลทันทีหลังแก้ | ต้องสื่อตอน demo ว่าหน้าเต็มอยู่ที่ "View all" |
 | Vite SPA (ไม่ใช่ Next.js) | เร็ว, ง่าย, เข้ากับ Go API | ไม่มี SSR/SEO — ไม่จำเป็นสำหรับ portal ภายใน |
@@ -869,12 +922,14 @@ volumes: { pg-data: {}, uploads: {} }
 | 5 | **Vertical slice:** `GET /profile` + `PUT /profile/contact/:field` (service + transaction + log) ครบทุกชั้น + หน้า Profile | แก้เบอร์จาก UI ได้จริง และเห็น log |
 | 6 | Auth (login/logout/me/middleware) | ต้อง login ก่อนเข้า `/profile/*` |
 | 7 | Endpoint ที่เหลือ: skills, photo, history | ครบ F1–F6 |
-| 8 | Frontend: SkillsPicker, Photo upload, Recent changes, History page, empty state, responsive | ครบทุกหน้า ทั้ง desktop และมือถือ |
+| 8 | Frontend: Skills picker, Photo upload, Recent changes, History page, empty state, responsive | ครบทุกหน้า ทั้ง desktop และมือถือ |
 | 9 | Tests (unit + integration + E2E หลาย viewport) | CI เขียว |
-| 10 | README (screenshots, วิธีรัน, demo accounts, design decisions), OpenAPI, ซ้อม demo / walkthrough | **พร้อมส่ง (core เสร็จ)** |
+| 10 | README (screenshots, วิธีรัน, demo accounts, design decisions), ซ้อม demo / walkthrough (OpenAPI ยังไม่ได้ทำ — API อธิบายใน §6) | **พร้อมส่ง (core เสร็จ)** |
 | 11 | Admin Tier 1: role + RBAC, Skills, Settings | ปรับ skill / history days จากหน้าจอได้ |
 | 12 | Admin Tier 2: Employees list/detail, แก้ชื่อ, Dashboard | admin แก้ชื่อแล้วเห็นใน history |
 | 13 | Admin Tier 3: สร้างบัญชี, reset รหัส, must-change-password | ถ้ามีเวลา |
+| 14 | ปรับโครง backend: แยก `entity` เป็น `shared` + `domain` ต่อ feature, แต่ละ feature แยก package `domain`/`model`/`repo`/`service`/`api`, route ทั้งหมดใน `server/routes.go` | route table เท่าเดิมทุก endpoint, test ผ่านทั้งหมด |
+| 15 | History retention: `HISTORY_RETENTION_DAYS` (90), retention job + role `retention`, เก็บรูปเก่า + popup ดูรูป | ทดสอบกับข้อมูลที่ backdate แล้วลบ/เก็บตรงกฎ |
 
 ### Nice-to-have (ถ้ามีเวลา)
 - Crop รูปก่อนอัปโหลด, dark mode, i18n TH/EN
