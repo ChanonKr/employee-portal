@@ -10,7 +10,9 @@ import (
 	"employee-portal/modules/auth"
 	"employee-portal/modules/employee"
 	"employee-portal/modules/file"
-	"employee-portal/modules/history"
+	historyapi "employee-portal/modules/history/api"
+	historyrepo "employee-portal/modules/history/repo"
+	historyservice "employee-portal/modules/history/service"
 	"employee-portal/modules/profile"
 	settingapi "employee-portal/modules/setting/api"
 	settingrepo "employee-portal/modules/setting/repo"
@@ -55,9 +57,13 @@ func (s *Server) routes() {
 		Log:    s.log,
 	})).RegisterRoutes(r, s.cfg.UploadMaxBytes)
 
-	history.NewHandler(history.NewUsecase(history.NewRepository(s.db), s.cfg.HistoryDays)).RegisterRoutes(r)
 	employee.NewHandler(employee.NewUsecase(employee.NewRepository(s.db))).RegisterRoutes(r)
 	file.NewHandler(s.files).RegisterRoutes(r)
+
+	// History is read-only; writes happen inside the profile transactions.
+	history := historyapi.New(historyservice.New(historyrepo.New(s.db), s.cfg.HistoryDays))
+	r.API.GET("/profile/history", r.SignedIn, r.Ready, middleware.RequireProfile(), history.ListOwn)
+	r.Admin.GET("/employees/:id/history", history.AdminList)
 
 	skills := skillapi.New(skillservice.New(skillrepo.New(s.db)))
 	r.API.GET("/skills", r.SignedIn, r.Ready, skills.List)

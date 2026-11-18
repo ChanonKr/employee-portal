@@ -9,8 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"employee-portal/modules/history"
 	historydomain "employee-portal/modules/history/domain"
+	historyrepo "employee-portal/modules/history/repo"
+	historyservice "employee-portal/modules/history/service"
 	"employee-portal/modules/shared"
 )
 
@@ -43,11 +44,11 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	addLog(t, empID, userID, "mobile_phone", `"0800000000"`, `"0811111111"`, "8 days")
 	addLog(t, empID, userID, "address", `null`, `"New address"`, "2 days")
 
-	uc := history.NewUsecase(history.NewRepository(appDB), 7)
+	uc := historyservice.New(historyrepo.New(appDB), 7)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
 	setHistoryDays(t, "7")
-	res, err := uc.ListOwn(ctx, history.ListInput{Actor: actor})
+	res, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: actor})
 	require.NoError(t, err)
 	assert.Equal(t, 7, res.Days)
 	require.Len(t, res.Items, 1, "the 8-day-old change is outside a 7-day window")
@@ -56,7 +57,7 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 	assert.True(t, res.HasOlder)
 
 	setHistoryDays(t, "10") // same use case instance: no restart
-	res, err = uc.ListOwn(ctx, history.ListInput{Actor: actor})
+	res, err = uc.ListOwn(ctx, historyservice.ListInput{Actor: actor})
 	require.NoError(t, err)
 	assert.Equal(t, 10, res.Days)
 	assert.Len(t, res.Items, 2)
@@ -66,11 +67,11 @@ func TestHistory_WindowFollowsSettingWithoutRestart(t *testing.T) {
 
 func TestHistory_EmptyStates(t *testing.T) {
 	ctx := context.Background()
-	uc := history.NewUsecase(history.NewRepository(appDB), 7)
+	uc := historyservice.New(historyrepo.New(appDB), 7)
 
 	// Never edited.
 	userID, empID, _ := newEmployee(t, "0811111111")
-	res, err := uc.ListOwn(ctx, history.ListInput{Actor: shared.Actor{UserID: userID, EmployeeID: empID}})
+	res, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: shared.Actor{UserID: userID, EmployeeID: empID}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)
 	assert.NotNil(t, res.Items)
@@ -79,7 +80,7 @@ func TestHistory_EmptyStates(t *testing.T) {
 	// Edited, but only long ago.
 	userID, empID, _ = newEmployee(t, "0811111111")
 	addLog(t, empID, userID, "address", `null`, `"Old"`, "30 days")
-	res, err = uc.ListOwn(ctx, history.ListInput{Actor: shared.Actor{UserID: userID, EmployeeID: empID}})
+	res, err = uc.ListOwn(ctx, historyservice.ListInput{Actor: shared.Actor{UserID: userID, EmployeeID: empID}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)
 	assert.True(t, res.HasOlder)
@@ -93,27 +94,27 @@ func TestHistory_FilterPagingAndValues(t *testing.T) {
 	addLog(t, empID, userID, "mobile_phone", `"0800000000"`, `"0811111111"`, "3 hours")
 	addLog(t, empID, userID, "address", `null`, `"A"`, "4 hours")
 
-	uc := history.NewUsecase(history.NewRepository(appDB), 7)
+	uc := historyservice.New(historyrepo.New(appDB), 7)
 	actor := shared.Actor{UserID: userID, EmployeeID: empID}
 
-	res, err := uc.ListOwn(ctx, history.ListInput{Actor: actor, Field: "mobile_phone"})
+	res, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: actor, Field: "mobile_phone"})
 	require.NoError(t, err)
 	require.Len(t, res.Items, 2)
 	for _, it := range res.Items {
 		assert.Equal(t, historydomain.FieldMobilePhone, it.Field)
 	}
 
-	res, err = uc.ListOwn(ctx, history.ListInput{Actor: actor, Field: "skills"})
+	res, err = uc.ListOwn(ctx, historyservice.ListInput{Actor: actor, Field: "skills"})
 	require.NoError(t, err)
 	require.Len(t, res.Items, 1)
 	assert.Equal(t, []any{"Go", "Flutter"}, res.Items[0].Old)
 	assert.Equal(t, []any{"Go", "React"}, res.Items[0].New)
 
-	page1, err := uc.ListOwn(ctx, history.ListInput{Actor: actor, Page: 1, PageSize: 3})
+	page1, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: actor, Page: 1, PageSize: 3})
 	require.NoError(t, err)
 	assert.Len(t, page1.Items, 3)
 	assert.True(t, page1.HasNext)
-	page2, err := uc.ListOwn(ctx, history.ListInput{Actor: actor, Page: 2, PageSize: 3})
+	page2, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: actor, Page: 2, PageSize: 3})
 	require.NoError(t, err)
 	require.Len(t, page2.Items, 1)
 	assert.False(t, page2.HasNext)
@@ -126,8 +127,8 @@ func TestHistory_OnlyOwnEmployee(t *testing.T) {
 	userB, empB, _ := newEmployee(t, "0811111111")
 	addLog(t, empB, userB, "address", `null`, `"B's address"`, "1 hour")
 
-	uc := history.NewUsecase(history.NewRepository(appDB), 7)
-	res, err := uc.ListOwn(ctx, history.ListInput{Actor: shared.Actor{UserID: userA, EmployeeID: empA}})
+	uc := historyservice.New(historyrepo.New(appDB), 7)
+	res, err := uc.ListOwn(ctx, historyservice.ListInput{Actor: shared.Actor{UserID: userA, EmployeeID: empA}})
 	require.NoError(t, err)
 	assert.Empty(t, res.Items)
 }

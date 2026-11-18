@@ -1,53 +1,26 @@
-package history
+package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"employee-portal/modules/shared"
+	"employee-portal/modules/history/service"
 	"employee-portal/pkg/httputil"
 	"employee-portal/pkg/middleware"
 )
 
-type Handler struct {
-	uc Usecase
+// API is the HTTP adapter for this feature. Routes are registered in modules/server.
+type API struct {
+	svc Service
 }
 
-func NewHandler(uc Usecase) *Handler {
-	return &Handler{uc: uc}
-}
-
-type changedByDTO struct {
-	ID   int64       `json:"id"`
-	Role shared.Role `json:"role"`
-}
-
-type itemDTO struct {
-	ID        int64        `json:"id"`
-	Field     string       `json:"field"`
-	OldValue  any          `json:"oldValue"`
-	NewValue  any          `json:"newValue"`
-	ChangedAt time.Time    `json:"changedAt"`
-	ChangedBy changedByDTO `json:"changedBy"`
-}
-
-type pageDTO struct {
-	Page     int  `json:"page"`
-	PageSize int  `json:"pageSize"`
-	HasNext  bool `json:"hasNext"`
-}
-
-type listResponse struct {
-	Days     *int      `json:"days"` // null = no window (admin view)
-	HasOlder bool      `json:"hasOlder"`
-	Items    []itemDTO `json:"items"`
-	Page     pageDTO   `json:"page"`
+func New(svc Service) *API {
+	return &API{svc: svc}
 }
 
 // ListOwn: GET /profile/history?field=&page=&pageSize=
-func (h *Handler) ListOwn(c *gin.Context) {
+func (h *API) ListOwn(c *gin.Context) {
 	page, err := httputil.QueryInt(c, "page")
 	if err != nil {
 		httputil.WriteError(c, err)
@@ -59,7 +32,7 @@ func (h *Handler) ListOwn(c *gin.Context) {
 		return
 	}
 
-	res, err := h.uc.ListOwn(c.Request.Context(), ListInput{
+	res, err := h.svc.ListOwn(c.Request.Context(), service.ListInput{
 		Actor:    middleware.ActorFrom(c),
 		Field:    c.Query("field"),
 		Page:     page,
@@ -73,7 +46,7 @@ func (h *Handler) ListOwn(c *gin.Context) {
 }
 
 // AdminList: GET /admin/employees/:id/history?field=&page=&pageSize= (all time)
-func (h *Handler) AdminList(c *gin.Context) {
+func (h *API) AdminList(c *gin.Context) {
 	id, ok := httputil.PathID(c, "id")
 	if !ok {
 		return
@@ -88,7 +61,7 @@ func (h *Handler) AdminList(c *gin.Context) {
 		httputil.WriteError(c, err)
 		return
 	}
-	res, err := h.uc.ListForEmployee(c.Request.Context(), id, ListInput{
+	res, err := h.svc.ListForEmployee(c.Request.Context(), id, service.ListInput{
 		Actor: middleware.ActorFrom(c), Field: c.Query("field"), Page: page, PageSize: pageSize,
 	})
 	if err != nil {
@@ -98,7 +71,7 @@ func (h *Handler) AdminList(c *gin.Context) {
 	c.JSON(http.StatusOK, toListResponse(res))
 }
 
-func toListResponse(r Result) listResponse {
+func toListResponse(r service.Result) listResponse {
 	items := make([]itemDTO, len(r.Items))
 	for i, l := range r.Items {
 		items[i] = itemDTO{

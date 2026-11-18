@@ -1,10 +1,10 @@
-package history
+package service
 
 import (
 	"context"
 	"errors"
 
-	historydomain "employee-portal/modules/history/domain"
+	"employee-portal/modules/history/domain"
 	"employee-portal/modules/shared"
 )
 
@@ -19,39 +19,40 @@ type Result struct {
 	AllTime  bool // admin view: no time window (Days is 0)
 	Days     int  // the window used, so the UI never hard-codes "7"
 	HasOlder bool // true when changes exist before the window
-	Items    []historydomain.ChangeLog
+	Items    []domain.ChangeLog
 	Page     shared.PageRequest
 	HasNext  bool
 }
 
-type usecase struct {
+// Service runs this feature's use cases. It never imports GORM or Gin.
+type Service struct {
 	repo         Repository
 	fallbackDays int // HISTORY_DAYS from env, used when the setting is missing or invalid
 }
 
-func NewUsecase(repo Repository, fallbackDays int) Usecase {
-	return &usecase{repo: repo, fallbackDays: fallbackDays}
+func New(repo Repository, fallbackDays int) *Service {
+	return &Service{repo: repo, fallbackDays: fallbackDays}
 }
 
-func (u *usecase) ListOwn(ctx context.Context, in ListInput) (Result, error) {
+func (svc *Service) ListOwn(ctx context.Context, in ListInput) (Result, error) {
 	q, err := buildQuery(in.Actor.EmployeeID, in)
 	if err != nil {
 		return Result{}, err
 	}
-	if q.Days, err = u.historyDays(ctx); err != nil {
+	if q.Days, err = svc.historyDays(ctx); err != nil {
 		return Result{}, err
 	}
-	res, err := u.list(ctx, q)
+	res, err := svc.list(ctx, q)
 	if err != nil {
 		return Result{}, err
 	}
-	if res.HasOlder, err = u.repo.HasOlder(ctx, q.EmployeeID, q.Days); err != nil {
+	if res.HasOlder, err = svc.repo.HasOlder(ctx, q.EmployeeID, q.Days); err != nil {
 		return Result{}, err
 	}
 	return res, nil
 }
 
-func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in ListInput) (Result, error) {
+func (svc *Service) ListForEmployee(ctx context.Context, employeeID int64, in ListInput) (Result, error) {
 	if err := shared.RequireAdmin(in.Actor); err != nil {
 		return Result{}, err
 	}
@@ -59,14 +60,14 @@ func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in List
 	if err != nil {
 		return Result{}, err
 	}
-	exists, err := u.repo.EmployeeExists(ctx, employeeID)
+	exists, err := svc.repo.EmployeeExists(ctx, employeeID)
 	if err != nil {
 		return Result{}, err
 	}
 	if !exists {
 		return Result{}, shared.ErrNotFound
 	}
-	res, err := u.list(ctx, q)
+	res, err := svc.list(ctx, q)
 	if err != nil {
 		return Result{}, err
 	}
@@ -74,16 +75,16 @@ func (u *usecase) ListForEmployee(ctx context.Context, employeeID int64, in List
 	return res, nil
 }
 
-func buildQuery(employeeID int64, in ListInput) (historydomain.HistoryQuery, error) {
+func buildQuery(employeeID int64, in ListInput) (domain.HistoryQuery, error) {
 	page, err := shared.NewPageRequest(in.Page, in.PageSize)
 	if err != nil {
-		return historydomain.HistoryQuery{}, err
+		return domain.HistoryQuery{}, err
 	}
-	q := historydomain.HistoryQuery{EmployeeID: employeeID, PageRequest: page}
+	q := domain.HistoryQuery{EmployeeID: employeeID, PageRequest: page}
 	if in.Field != "" {
-		f, err := historydomain.ParseFieldName(in.Field)
+		f, err := domain.ParseFieldName(in.Field)
 		if err != nil {
-			return historydomain.HistoryQuery{}, err
+			return domain.HistoryQuery{}, err
 		}
 		q.Field = &f
 	}
@@ -91,8 +92,8 @@ func buildQuery(employeeID int64, in ListInput) (historydomain.HistoryQuery, err
 }
 
 // list fetches one extra row to tell whether there is a next page without COUNT.
-func (u *usecase) list(ctx context.Context, q historydomain.HistoryQuery) (Result, error) {
-	items, err := u.repo.List(ctx, q, q.PageSize+1)
+func (svc *Service) list(ctx context.Context, q domain.HistoryQuery) (Result, error) {
+	items, err := svc.repo.List(ctx, q, q.PageSize+1)
 	if err != nil {
 		return Result{}, err
 	}
@@ -104,17 +105,17 @@ func (u *usecase) list(ctx context.Context, q historydomain.HistoryQuery) (Resul
 }
 
 // historyDays reads the admin setting (no restart needed after a change).
-func (u *usecase) historyDays(ctx context.Context) (int, error) {
-	raw, err := u.repo.HistoryDays(ctx)
+func (svc *Service) historyDays(ctx context.Context) (int, error) {
+	raw, err := svc.repo.HistoryDays(ctx)
 	if errors.Is(err, shared.ErrNotFound) {
-		return u.fallbackDays, nil
+		return svc.fallbackDays, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	days, err := historydomain.ParseHistoryDays(raw)
+	days, err := domain.ParseHistoryDays(raw)
 	if err != nil {
-		return u.fallbackDays, nil // a bad stored value must not break the page
+		return svc.fallbackDays, nil // a bad stored value must not break the page
 	}
 	return days, nil
 }
