@@ -9,9 +9,10 @@ test('sign in, edit mobile, and see it in recent changes and history', async ({ 
   const input = page.getByRole('textbox', { name: 'Mobile' })
   await input.fill('12ab')
   await page.getByRole('button', { name: 'Save' }).click()
-  await expect(page.getByText(/Enter 9–15 digits/)).toBeVisible()
+  await expect(page.getByText(/Enter a 10-digit mobile number/)).toBeVisible()
 
   await input.fill('081-234-5678')
+  await expect(input).toHaveValue('0812345678') // digits only, no spaces
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByText('Mobile saved')).toBeVisible()
   const card = (title: string) => page.locator('section').filter({ has: page.getByRole('heading', { name: title }) })

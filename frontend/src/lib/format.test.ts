@@ -4,7 +4,8 @@ const now = new Date('2026-11-17T12:00:00')
 
 it('formats Thai mobile numbers', () => {
   expect(formatPhone('0812345678')).toBe('081 234 5678')
-  expect(formatPhone('+66812345678')).toBe('+66812345678')
+  expect(formatPhone('0212345678')).toBe('021 234 5678')
+  expect(formatPhone('+66812345678')).toBe('+66812345678') // older value: shown as is
   expect(formatPhone(null)).toBeNull()
 })
 

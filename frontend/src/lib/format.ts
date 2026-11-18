@@ -1,8 +1,9 @@
 /** 0812345678 → 081 234 5678 (other formats are shown as stored). */
+/** 0812345678 → "081 234 5678". Anything else (older stored values) is shown as is. */
 export function formatPhone(v: string | null): string | null {
   if (!v) return v
-  const m = /^0(\d{2})(\d{3})(\d{4})$/.exec(v)
-  return m ? `0${m[1]} ${m[2]} ${m[3]}` : v
+  const m = /^(\d{3})(\d{3})(\d{4})$/.exec(v)
+  return m ? `${m[1]} ${m[2]} ${m[3]}` : v
 }
 
 export function initials(first: string, last: string): string {

@@ -13,7 +13,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { formatPhone } from '@/lib/format'
 import { useIsDesktop } from '@/lib/useMediaQuery'
 import { useUpdateContact, type ContactKey } from './api'
-import { contactSchemas } from './contactRules'
+import { MOBILE_DIGITS, contactSchemas, onlyDigits } from './contactRules'
 
 type FieldDef = {
   key: ContactKey
@@ -108,7 +108,8 @@ function ContactForm({ def, value, id, onDone, inline }: { def: FieldDef; value:
     formState: { errors },
   } = useForm<{ value: string }, unknown, { value: string }>({
     resolver: zodResolver(schema),
-    defaultValues: { value: value ?? '' },
+    // An older stored number with + or separators is cleaned up when edited.
+    defaultValues: { value: def.key === 'mobile' ? onlyDigits(value ?? '') : (value ?? '') },
   })
 
   const onSubmit = handleSubmit(({ value: v }) =>
@@ -127,13 +128,15 @@ function ContactForm({ def, value, id, onDone, inline }: { def: FieldDef; value:
     }),
   )
 
+  const mobile = def.key === 'mobile'
+  const field = register('value')
   const common = {
     id,
     'aria-label': def.label,
     'aria-invalid': !!errors.value,
-    'aria-describedby': errors.value ? `${id}-error` : undefined,
+    'aria-describedby': errors.value ? `${id}-error` : mobile ? `${id}-hint` : undefined,
     autoFocus: true,
-    ...register('value'),
+    ...field,
   }
 
   return (
@@ -141,13 +144,28 @@ function ContactForm({ def, value, id, onDone, inline }: { def: FieldDef; value:
       <div className="space-y-1.5">
         {def.key === 'address' ? (
           <Textarea {...common} autoComplete="street-address" rows={3} />
-        ) : (
+        ) : mobile ? (
           <Input
             {...common}
-            type={def.key === 'mobile' ? 'tel' : 'email'}
-            inputMode={def.key === 'mobile' ? 'tel' : 'email'}
-            autoComplete={def.key === 'mobile' ? 'tel' : 'email'}
+            // Digits only, no spaces: typed or pasted separators are dropped as you go.
+            onChange={(e) => {
+              e.target.value = onlyDigits(e.target.value)
+              return field.onChange(e)
+            }}
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            // No maxLength: it would cut a pasted "081-234-5678" before the dashes are
+            // dropped. onlyDigits keeps at most 10 digits instead.
+            placeholder="0812345678"
           />
+        ) : (
+          <Input {...common} type="email" inputMode="email" autoComplete="email" placeholder="name@example.com" />
+        )}
+        {mobile && !errors.value && (
+          <p id={`${id}-hint`} className="text-xs text-muted">
+            {MOBILE_DIGITS} digits, numbers only
+          </p>
         )}
         {errors.value && (
           <p id={`${id}-error`} role="alert" className="text-sm text-danger">

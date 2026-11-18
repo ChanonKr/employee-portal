@@ -49,18 +49,45 @@ describe('ProfilePage', () => {
     const input = screen.getByRole('textbox', { name: 'Mobile' })
 
     await userEvent.type(input, '12ab')
+    expect(input).toHaveValue('12') // letters never reach the field
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(await screen.findByText(/Enter 9–15 digits/)).toBeInTheDocument()
+    expect(await screen.findByText(/Enter a 10-digit mobile number/)).toBeInTheDocument()
     expect(fetch.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(false)
 
     await userEvent.clear(input)
-    await userEvent.type(input, '081-234-5678')
+    await userEvent.type(input, '081-234-5678 99')
+    expect(input).toHaveValue('0812345678') // separators dropped, at most 10 digits
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(fetch.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(true))
     const [url, init] = fetch.mock.calls.find(([, i]) => i?.method === 'PUT')!
     expect(url).toBe('/api/v1/profile/contact/mobile')
     expect((init!.headers as Record<string, string>)['If-Match']).toBe('"1"')
     expect(JSON.parse(init!.body as string)).toEqual({ value: '0812345678' })
+  })
+
+  it('shows the mobile number grouped as 081 234 5678', async () => {
+    server({ ...empty, contact: { mobilePhone: '0812345678', email: null, address: null } })
+    renderRoute(<ProfilePage />)
+    expect(await screen.findByText('081 234 5678')).toBeInTheDocument()
+  })
+
+  it('checks the email format before sending', async () => {
+    const fetch = server(empty, () => ({ status: 200, body: { version: 2 } }))
+    renderRoute(<ProfilePage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add email' }))
+    const input = screen.getByRole('textbox', { name: 'Email' })
+    for (const bad of ['somchai', 'somchai@example', 'som..chai@example.com', 'som chai@example.com']) {
+      await userEvent.clear(input)
+      await userEvent.type(input, bad)
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(await screen.findByText('Enter a valid email address, like name@example.com')).toBeInTheDocument()
+    }
+    expect(fetch.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(false)
+
+    await userEvent.clear(input)
+    await userEvent.type(input, 'Somchai+hr@Mail.Example.co.th')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fetch.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(true))
   })
 
   it('shows the server message when it rejects a value', async () => {
