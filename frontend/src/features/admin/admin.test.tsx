@@ -1,6 +1,7 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { mockFetch, renderRoute } from '@/test/render'
+import { EmployeeDetailPage } from './EmployeeDetailPage'
 import { EmployeesPage } from './EmployeesPage'
 import { SettingsPage } from './SettingsPage'
 
@@ -69,5 +70,25 @@ describe('EmployeesPage', () => {
     renderRoute(<EmployeesPage />)
     await userEvent.type(await screen.findByLabelText('Search employees'), 'zzz')
     expect(await screen.findByText('No employees match “zzz”')).toBeInTheDocument()
+  })
+})
+
+describe('EmployeeDetailPage', () => {
+  it('labels the history with the retention, not "all time"', async () => {
+    mockFetch((url) => {
+      if (url.includes('/auth/me')) return { status: 200, body: { userId: 1, role: 'admin' } }
+      if (url.endsWith('/admin/settings')) return { status: 200, body: { historyDays: 7, maxHistoryDays: 90, updatedBy: null, updatedAt: null } }
+      if (url.includes('/admin/employees/5/history')) return { status: 200, body: { days: null, hasOlder: false, items: [], page: { page: 1, pageSize: 20, hasNext: false } } }
+      if (url.endsWith('/admin/employees/5')) {
+        return { status: 200, body: {
+          id: 5, employeeCode: 'EMP-00005', firstName: 'Suda', lastName: 'Rakdee', photoUrl: null,
+          contact: { mobilePhone: '0812345678', email: null, address: null }, skills: [], version: 1, role: 'employee', isActive: true,
+        } }
+      }
+      return undefined
+    })
+    renderRoute(<EmployeeDetailPage />, { path: '/admin/employees/:id', at: '/admin/employees/5' })
+    expect(await screen.findByText('· last 90 days')).toBeInTheDocument()
+    expect(screen.queryByText(/all time/)).not.toBeInTheDocument()
   })
 })

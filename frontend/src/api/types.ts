@@ -40,7 +40,7 @@ export type HistoryItem = {
 }
 
 export type HistoryPage = {
-  days: number | null // null = all time (admin view)
+  days: number | null // null = no window: everything still kept (admin view)
   hasOlder: boolean
   items: HistoryItem[]
   page: { page: number; pageSize: number; hasNext: boolean }

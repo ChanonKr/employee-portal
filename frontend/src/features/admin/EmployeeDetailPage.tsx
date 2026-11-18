@@ -20,13 +20,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useMe } from '@/features/auth/api'
 import { HistoryTimeline, PAGE_SIZE } from '@/features/history/HistoryTimeline'
 import { formatPhone } from '@/lib/format'
-import { adminKeys, useEmployee, useRenameEmployee, useResetPassword } from './api'
+import { adminKeys, useEmployee, useRenameEmployee, useResetPassword, useSettings } from './api'
 import { TempPassword } from './TempPassword'
 
 export function EmployeeDetailPage() {
   const id = Number(useParams().id)
   const employee = useEmployee(id)
   const { data: me } = useMe()
+  const keptDays = useSettings().data?.maxHistoryDays
 
   return (
     <div className="space-y-4">
@@ -46,7 +47,9 @@ export function EmployeeDetailPage() {
           </div>
           <section aria-labelledby="history-title" className="space-y-3">
             <h2 id="history-title" className="text-lg font-semibold">
-              Change history <span className="text-sm font-normal text-muted">· all time</span>
+              Change history{' '}
+              {/* Admins see everything still kept: HISTORY_RETENTION_DAYS (maxHistoryDays). */}
+              {keptDays && <span className="text-sm font-normal text-muted">· last {keptDays} days</span>}
             </h2>
             <HistoryTimeline
               queryKey={adminKeys.employeeHistory(id)}

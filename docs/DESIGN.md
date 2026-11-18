@@ -705,7 +705,7 @@ export default defineConfig({
 - Timeline จัดกลุ่มตามวัน (Today / Yesterday / วันที่) · แต่ละรายการ: ไอคอน field, `ค่าเดิม` (ขีดฆ่า) → ค่าใหม่, เวลา, ผู้แก้ (ไอคอนคน = ตัวเอง, ไอคอนโล่ = admin)
 - Skills แสดงเป็น diff สี: `+CI/CD` (เขียว) `−Flutter` (แดง)
 - Timeline แบบเดียวกันทุกขนาดจอ (การ์ดต่อวัน — อ่านง่ายกว่าตารางเมื่อค่าเป็น diff ของ skills) · chip filter เลื่อนแนวนอนบนมือถือ · โหลดเพิ่มด้วย "Load more" (`useInfiniteQuery`)
-- `HistoryTimeline` ใช้ร่วมกับหน้า admin (`/admin/employees/:id` แสดง "all time" เพราะ API คืน `days: null`)
+- `HistoryTimeline` ใช้ร่วมกับหน้า admin (`/admin/employees/:id` แสดง "last 90 days" — API คืน `days: null` = ทุกอย่างที่ยังเก็บอยู่ และจำนวนวันมาจาก `maxHistoryDays` ใน `/admin/settings`)
 - Empty state ใช้ข้อความเดียวกับ §9.5
 
 ### 9.7 หน้า Admin

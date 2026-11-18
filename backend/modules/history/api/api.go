@@ -46,7 +46,7 @@ func (h *API) ListOwn(c *gin.Context) {
 	c.JSON(http.StatusOK, toListResponse(res))
 }
 
-// AdminList: GET /admin/employees/:id/history?field=&page=&pageSize= (all time)
+// AdminList: GET /admin/employees/:id/history?field=&page=&pageSize= (everything still kept)
 func (h *API) AdminList(c *gin.Context) {
 	id, ok := httputil.PathID(c, "id")
 	if !ok {
