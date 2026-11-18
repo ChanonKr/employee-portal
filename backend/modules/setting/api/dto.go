@@ -12,9 +12,10 @@ type updatedByDTO struct {
 }
 
 type settingsResponse struct {
-	HistoryDays int           `json:"historyDays"`
-	UpdatedBy   *updatedByDTO `json:"updatedBy"`
-	UpdatedAt   *time.Time    `json:"updatedAt"`
+	HistoryDays    int           `json:"historyDays"`
+	MaxHistoryDays int           `json:"maxHistoryDays"` // retention: the window cannot be longer
+	UpdatedBy      *updatedByDTO `json:"updatedBy"`
+	UpdatedAt      *time.Time    `json:"updatedAt"`
 }
 
 type historyDaysRequest struct {

@@ -28,12 +28,13 @@ export function SettingsPage() {
   if (settings.isError) return <ErrorAlert>Could not load settings. {settings.error.message}</ErrorAlert>
 
   const s = settings.data
+  const max = s.maxHistoryDays
   const n = Number(value)
-  const valid = Number.isInteger(n) && n >= 1 && n <= 365
+  const valid = Number.isInteger(n) && n >= 1 && n <= max
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (!valid) return setError('Enter a whole number from 1 to 365.')
+    if (!valid) return setError(`Enter a whole number from 1 to ${max}.`)
     save.mutate(n, {
       onSuccess: () => toast.success(`Employees now see the last ${n} days of changes`),
       onError: (err) => setError(errorMessage(err)),
@@ -47,13 +48,13 @@ export function SettingsPage() {
         <CardTitle>Change history</CardTitle>
         <p className="mt-1 text-sm text-muted">How many days of changes employees see on their profile.</p>
         <form onSubmit={submit} noValidate className="mt-4 space-y-4">
-          <Field id="historyDays" label="Days shown" error={error ?? undefined} hint="1–365 days. Older records are kept, just hidden.">
+          <Field id="historyDays" label="Days shown" error={error ?? undefined} hint={`1–${max} days. Changes are kept for ${max} days, then deleted.`}>
             <Input
               id="historyDays"
               type="number"
               inputMode="numeric"
               min={1}
-              max={365}
+              max={max}
               value={value}
               onChange={(e) => {
                 setValue(e.target.value)
@@ -65,7 +66,7 @@ export function SettingsPage() {
             />
           </Field>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Presets">
-            {presets.map((p) => (
+            {presets.filter((p) => p <= max).map((p) => (
               <button
                 key={p}
                 type="button"

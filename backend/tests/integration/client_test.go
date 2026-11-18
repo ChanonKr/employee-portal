@@ -29,7 +29,7 @@ type apiClient struct {
 func newTestServer(t *testing.T) string {
 	t.Helper()
 	srv, err := server.New(configs.Config{
-		JWTSecret: randomSecret(t), JWTTTL: 3600e9, HistoryDays: 7,
+		JWTSecret: randomSecret(t), JWTTTL: 3600e9, HistoryRetentionDays: 90,
 		CORSOrigins: []string{"http://localhost:5173"},
 		UploadDir:   t.TempDir(), UploadMaxBytes: 5 << 20,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), appDB)

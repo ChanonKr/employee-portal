@@ -138,14 +138,15 @@ func TestAdmin_HistoryDaysTakesEffectImmediately(t *testing.T) {
 	emp := login(t, base, code)
 
 	type settings struct {
-		HistoryDays int `json:"historyDays"`
-		UpdatedBy   *struct {
+		HistoryDays    int `json:"historyDays"`
+		MaxHistoryDays int `json:"maxHistoryDays"`
+		UpdatedBy      *struct {
 			EmployeeCode string `json:"employeeCode"`
 		} `json:"updatedBy"`
 		UpdatedAt *time.Time `json:"updatedAt"`
 	}
 
-	for _, bad := range []any{0, 366, "30", nil} {
+	for _, bad := range []any{0, 91, "30", nil} { // 91: longer than the retention (90)
 		res := admin.do("PUT", "/api/v1/admin/settings/history-days", map[string]any{"value": bad}, nil)
 		assert.Equal(t, http.StatusBadRequest, res.StatusCode, bad)
 	}
@@ -155,6 +156,7 @@ func TestAdmin_HistoryDaysTakesEffectImmediately(t *testing.T) {
 
 	s := decodeJSON[settings](t, admin.do("GET", "/api/v1/admin/settings", nil, nil))
 	assert.Equal(t, 30, s.HistoryDays)
+	assert.Equal(t, 90, s.MaxHistoryDays)
 	require.NotNil(t, s.UpdatedBy)
 	assert.Equal(t, adminCode, s.UpdatedBy.EmployeeCode)
 	assert.NotNil(t, s.UpdatedAt)

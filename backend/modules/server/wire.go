@@ -48,9 +48,9 @@ func (s *Server) wire() apis {
 			Files:  s.files,
 			Log:    s.log,
 		})),
-		history:  historyapi.New(historyservice.New(historyrepo.New(s.db), s.cfg.HistoryDays)),
+		history:  historyapi.New(historyservice.New(historyrepo.New(s.db), s.cfg.HistoryRetentionDays)),
 		skill:    skillapi.New(skillservice.New(skillrepo.New(s.db))),
-		setting:  settingapi.New(settingservice.New(settingrepo.New(s.db), s.cfg.HistoryDays)),
+		setting:  settingapi.New(settingservice.New(settingrepo.New(s.db), s.cfg.HistoryRetentionDays)),
 		employee: employeeapi.New(employeeservice.New(employeerepo.New(s.db))),
 		file:     fileapi.New(s.files),
 	}

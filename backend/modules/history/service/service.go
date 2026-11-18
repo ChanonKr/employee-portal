@@ -26,12 +26,12 @@ type Result struct {
 
 // Service runs the change history use cases. It never imports GORM or Gin.
 type Service struct {
-	repo         Repository
-	fallbackDays int // HISTORY_DAYS from env, used when the setting is missing or invalid
+	repo          Repository
+	retentionDays int // HISTORY_RETENTION_DAYS: the window is never longer
 }
 
-func New(repo Repository, fallbackDays int) *Service {
-	return &Service{repo: repo, fallbackDays: fallbackDays}
+func New(repo Repository, retentionDays int) *Service {
+	return &Service{repo: repo, retentionDays: retentionDays}
 }
 
 func (svc *Service) ListOwn(ctx context.Context, in ListInput) (Result, error) {
@@ -105,17 +105,11 @@ func (svc *Service) list(ctx context.Context, q domain.HistoryQuery) (Result, er
 }
 
 // historyDays reads the admin setting (no restart needed after a change).
+// A missing or bad stored value falls back to the default; it must not break the page.
 func (svc *Service) historyDays(ctx context.Context) (int, error) {
 	raw, err := svc.repo.HistoryDays(ctx)
-	if errors.Is(err, shared.ErrNotFound) {
-		return svc.fallbackDays, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, shared.ErrNotFound) {
 		return 0, err
 	}
-	days, err := domain.ParseHistoryDays(raw)
-	if err != nil {
-		return svc.fallbackDays, nil // a bad stored value must not break the page
-	}
-	return days, nil
+	return domain.HistoryWindow(raw, svc.retentionDays), nil
 }

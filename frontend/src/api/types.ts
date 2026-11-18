@@ -54,6 +54,7 @@ export type AdminSkill = { id: number; name: string; isActive: boolean; sortOrde
 
 export type AdminSettings = {
   historyDays: number
+  maxHistoryDays: number // retention: changes older than this are deleted
   updatedBy: { id: number; employeeCode: string } | null
   updatedAt: string | null
 }

@@ -53,20 +53,39 @@ type ChangeLog struct {
 	ChangedAt time.Time
 }
 
-// ── history window ("7 days" is how far back we show, not how long we keep)
+// ── history window and retention
+//
+// Two different numbers:
+//   - retention (HISTORY_RETENTION_DAYS, default 90): how long changes are kept
+//     before the retention job deletes them. Set by operators, not in the UI.
+//   - window (app_settings.history_days, default 7): how far back employees see
+//     on their profile. Set by admins in the UI; never more than retention.
 
 const (
-	MinHistoryDays = 1
-	MaxHistoryDays = 365
+	DefaultHistoryDays = 7 // window when the admin setting is missing or invalid
+	MinHistoryDays     = 1
+	MaxRetentionDays   = 3650 // upper bound for HISTORY_RETENTION_DAYS
 )
 
-// ParseHistoryDays validates the stored history_days setting.
+// ParseHistoryDays validates the stored history_days setting (a whole number ≥ 1).
+// The upper bound is the retention, applied by HistoryWindow.
 func ParseHistoryDays(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil || n < MinHistoryDays || n > MaxHistoryDays {
-		return 0, shared.NewValidationError("historyDays", "must be a whole number from 1 to 365")
+	if err != nil || n < MinHistoryDays {
+		return 0, shared.NewValidationError("historyDays", "must be a whole number of at least 1")
 	}
 	return n, nil
+}
+
+// HistoryWindow is the window employees see: the stored setting when it is valid,
+// otherwise DefaultHistoryDays, and never more days than are kept.
+// raw is "" when the setting does not exist.
+func HistoryWindow(raw string, retentionDays int) int {
+	days, err := ParseHistoryDays(raw)
+	if err != nil {
+		days = DefaultHistoryDays
+	}
+	return min(days, retentionDays)
 }
 
 // HistoryQuery selects change logs for one employee, newest first.

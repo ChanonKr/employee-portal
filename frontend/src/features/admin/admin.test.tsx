@@ -7,10 +7,10 @@ import { SettingsPage } from './SettingsPage'
 afterEach(() => vi.unstubAllGlobals())
 
 describe('SettingsPage', () => {
-  it('validates 1–365 and saves with presets', async () => {
+  it('validates 1 to the retention and saves with presets', async () => {
     const fetch = mockFetch((url, init) => {
       if (init.method === 'PUT') return { status: 204 }
-      if (url.endsWith('/admin/settings')) return { status: 200, body: { historyDays: 7, updatedBy: null, updatedAt: null } }
+      if (url.endsWith('/admin/settings')) return { status: 200, body: { historyDays: 7, maxHistoryDays: 90, updatedBy: null, updatedAt: null } }
       return undefined
     })
     renderRoute(<SettingsPage />)
@@ -20,9 +20,9 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
 
     await userEvent.clear(input)
-    await userEvent.type(input, '400')
+    await userEvent.type(input, '91')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(await screen.findByText('Enter a whole number from 1 to 365.')).toBeInTheDocument()
+    expect(await screen.findByText('Enter a whole number from 1 to 90.')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '30 days' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))

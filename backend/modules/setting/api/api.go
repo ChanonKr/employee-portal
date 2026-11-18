@@ -26,18 +26,18 @@ func (h *API) Get(c *gin.Context) {
 		httputil.WriteError(c, err)
 		return
 	}
-	res := settingsResponse{HistoryDays: s.Days, UpdatedAt: s.UpdatedAt}
+	res := settingsResponse{HistoryDays: s.Days, MaxHistoryDays: s.MaxDays, UpdatedAt: s.UpdatedAt}
 	if s.UpdatedByID != nil && s.UpdatedByCode != nil {
 		res.UpdatedBy = &updatedByDTO{ID: *s.UpdatedByID, EmployeeCode: *s.UpdatedByCode}
 	}
 	c.JSON(http.StatusOK, res)
 }
 
-// SetHistoryDays: PUT /admin/settings/history-days {value} (1–365) → 204
+// SetHistoryDays: PUT /admin/settings/history-days {value} (1 to maxHistoryDays) → 204
 func (h *API) SetHistoryDays(c *gin.Context) {
 	var req historyDaysRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httputil.WriteError(c, shared.NewValidationError("value", "must be a whole number from 1 to 365"))
+		httputil.WriteError(c, shared.NewValidationError("value", "must be a whole number of days"))
 		return
 	}
 	if err := h.svc.SetHistoryDays(c.Request.Context(), middleware.ActorFrom(c), *req.Value); err != nil {
